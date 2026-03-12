@@ -11,7 +11,7 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "parse_excel",
             "description": (
-                "解析Excel花名册文件，支持任意格式的.xlsx文件。"
+                "解析花名册文件，支持.xlsx、.xls、.et（WPS）、.csv格式。"
                 "自动检测表头行，返回列名、行数、样本数据和全部数据。"
                 "这是第一步：在分析或搜索之前必须先解析文件。"
             ),

@@ -2,7 +2,6 @@
 
 import json
 import os
-import tempfile
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
@@ -12,6 +11,8 @@ from hr_matching.llm.orchestrator import run_query
 
 _CONFIG_DIR = Path.home() / ".hr_matching"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".et", ".csv"}
 
 
 def _load_saved_key() -> str:
@@ -32,6 +33,16 @@ def _save_key(key: str):
         json.dumps({"api_key": key}, ensure_ascii=False),
         encoding="utf-8",
     )
+
+
+def _scan_data_dir() -> list[Path]:
+    """Scan data/ directory for supported spreadsheet files."""
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    files = []
+    for f in sorted(_DATA_DIR.iterdir()):
+        if f.suffix.lower() in _SUPPORTED_EXTENSIONS:
+            files.append(f)
+    return files
 
 
 st.set_page_config(page_title="HR花名册智能匹配", page_icon="👥", layout="wide")
@@ -70,38 +81,47 @@ with st.sidebar:
     st.markdown("### 📖 使用说明")
     st.markdown(
         "1. 输入 OpenRouter API Key（仅需一次）\n"
-        "2. 上传任意格式的 HR Excel 花名册\n"
-        "3. 用自然语言描述你要找的人\n"
+        "2. 将花名册文件放入 `data/` 文件夹\n"
+        "3. 在下方选择文件，用自然语言提问\n"
         "4. AI 会自动解析、筛选、评分"
     )
 
 # --- Main Area ---
 st.title("👥 HR花名册智能匹配系统")
-st.caption("上传任意格式的Excel花名册，用自然语言查找合适的人选")
+st.caption("所有数据均在本地处理，不会上传到任何服务器")
 
-# File uploader
-uploaded_file = st.file_uploader(
-    "上传Excel花名册",
-    type=["xlsx", "xls"],
-    help="支持任意格式的Excel花名册，系统会自动识别列含义",
-)
+# --- File Selection (local folder scan) ---
+available_files = _scan_data_dir()
 
-# Save uploaded file to temp path
 file_path = None
-if uploaded_file is not None:
-    suffix = ".xlsx" if uploaded_file.name.endswith(".xlsx") else ".xls"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(uploaded_file.getvalue())
-        file_path = tmp.name
+if not available_files:
+    st.info(
+        f"📂 请将 Excel/CSV 花名册文件放入项目的 **data/** 文件夹中\n\n"
+        f"支持格式：.xlsx、.xls、.et（WPS）、.csv\n\n"
+        f"文件夹路径：`{_DATA_DIR}`"
+    )
+    if st.button("🔄 刷新文件列表"):
+        st.rerun()
+else:
+    selected_name = st.selectbox(
+        "📂 选择花名册文件（来自 data/ 文件夹）",
+        [f.name for f in available_files],
+        help=f"将文件放入 {_DATA_DIR} 即可在此显示",
+    )
+    if selected_name:
+        file_path = str(_DATA_DIR / selected_name)
 
-    # Preview the file
-    with st.expander("📋 预览上传的文件", expanded=False):
-        try:
-            df = pd.read_excel(uploaded_file)
-            st.dataframe(df.head(10), use_container_width=True)
-            st.caption(f"共 {len(df)} 行, {len(df.columns)} 列")
-        except Exception as e:
-            st.warning(f"预览失败: {e}")
+        # Preview
+        with st.expander("📋 预览文件内容", expanded=False):
+            try:
+                if selected_name.lower().endswith(".csv"):
+                    df = pd.read_csv(file_path)
+                else:
+                    df = pd.read_excel(file_path)
+                st.dataframe(df.head(10), use_container_width=True)
+                st.caption(f"共 {len(df)} 行, {len(df.columns)} 列")
+            except Exception as e:
+                st.warning(f"预览失败: {e}")
 
 # Initialize chat history
 if "messages" not in st.session_state:
@@ -119,7 +139,7 @@ if prompt := st.chat_input("描述你要找的人，例如：帮我找技术部3
         st.stop()
 
     if not file_path:
-        st.error("请先上传Excel花名册文件")
+        st.error("请先将花名册文件放入 data/ 文件夹")
         st.stop()
 
     # Add user message

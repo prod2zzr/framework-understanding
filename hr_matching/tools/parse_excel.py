@@ -1,10 +1,12 @@
-"""Tool: Parse Excel files in any format into structured data."""
+"""Tool: Parse spreadsheet files in any format into structured data."""
 
-import json
+import csv
+import io
 from datetime import datetime, date
 from pathlib import Path
 
 import openpyxl
+import pandas as pd
 
 
 def _serialize_value(val):
@@ -30,20 +32,33 @@ def _detect_header_row(sheet, max_scan=20):
     return best_row
 
 
-def parse_excel(file_path: str, sheet_name: str = None) -> dict:
-    """Parse an Excel file and return structured data.
+def _parse_csv(path: Path) -> dict:
+    """Parse a CSV file and return structured data."""
+    try:
+        df = pd.read_csv(str(path))
+    except Exception as e:
+        return {"error": f"Cannot read CSV: {e}"}
 
-    Args:
-        file_path: Path to the Excel file (.xlsx or .xls).
-        sheet_name: Optional sheet name. If not given, uses the first sheet.
+    columns = [str(c) for c in df.columns.tolist()]
+    all_data = []
+    for _, row in df.iterrows():
+        row_dict = {}
+        for col in columns:
+            val = row[col]
+            row_dict[col] = _serialize_value(val if pd.notna(val) else None)
+        all_data.append(row_dict)
 
-    Returns:
-        dict with keys: columns, row_count, sample_rows (first 5), all_data
-    """
-    path = Path(file_path)
-    if not path.exists():
-        return {"error": f"File not found: {file_path}"}
+    return {
+        "columns": columns,
+        "row_count": len(all_data),
+        "sample_rows": all_data[:5],
+        "all_data": all_data,
+        "sheet_names": [],
+    }
 
+
+def _parse_workbook(path: Path, sheet_name: str = None) -> dict:
+    """Parse an Excel/ET workbook file using openpyxl."""
     try:
         wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
     except Exception as e:
@@ -66,7 +81,6 @@ def parse_excel(file_path: str, sheet_name: str = None) -> dict:
     all_data = []
     for row_idx in range(header_row + 1, sheet.max_row + 1):
         row_values = [_serialize_value(cell.value) for cell in sheet[row_idx]]
-        # Skip completely empty rows
         if all(v is None for v in row_values):
             continue
         row_dict = {}
@@ -74,14 +88,37 @@ def parse_excel(file_path: str, sheet_name: str = None) -> dict:
             row_dict[col] = row_values[i] if i < len(row_values) else None
         all_data.append(row_dict)
 
+    sheet_names = wb.sheetnames if hasattr(wb, 'sheetnames') else []
     wb.close()
-
-    sample_rows = all_data[:5]
 
     return {
         "columns": columns,
         "row_count": len(all_data),
-        "sample_rows": sample_rows,
+        "sample_rows": all_data[:5],
         "all_data": all_data,
-        "sheet_names": wb.sheetnames if hasattr(wb, 'sheetnames') else [],
+        "sheet_names": sheet_names,
     }
+
+
+def parse_excel(file_path: str, sheet_name: str = None) -> dict:
+    """Parse a spreadsheet file and return structured data.
+
+    Args:
+        file_path: Path to the file (.xlsx, .xls, .et, .csv).
+        sheet_name: Optional sheet name (ignored for CSV).
+
+    Returns:
+        dict with keys: columns, row_count, sample_rows (first 5), all_data
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return {"error": f"File not found: {file_path}"}
+
+    suffix = path.suffix.lower()
+
+    if suffix == ".csv":
+        return _parse_csv(path)
+    elif suffix in (".xlsx", ".xls", ".et"):
+        return _parse_workbook(path, sheet_name)
+    else:
+        return {"error": f"Unsupported format: {suffix}. Supported: .xlsx, .xls, .et, .csv"}
