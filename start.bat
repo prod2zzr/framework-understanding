@@ -15,18 +15,6 @@ if not exist "venv\Scripts\activate.bat" (
 :: Activate venv
 call venv\Scripts\activate.bat
 
-:: Load .env file
-if exist ".env" (
-    for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
-        set "%%a=%%b"
-    )
-    echo  API Key 已加载
-) else (
-    echo  !! 未找到 .env 文件，请先运行 setup.bat
-    pause
-    exit /b 1
-)
-
 :: Start Streamlit
 echo  启动应用，浏览器将自动打开...
 echo  关闭此窗口可停止应用

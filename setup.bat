@@ -6,7 +6,7 @@ echo ============================================
 echo.
 
 :: Step 1: Check Python
-echo [1/4] 检测 Python 环境...
+echo [1/3] 检测 Python 环境...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo       未检测到 Python，尝试自动安装...
@@ -28,7 +28,7 @@ for /f "tokens=*" %%i in ('python --version') do echo       %%i 已安装
 
 :: Step 2: Create virtual environment
 echo.
-echo [2/4] 创建虚拟环境...
+echo [2/3] 创建虚拟环境...
 if not exist "venv" (
     python -m venv venv
     echo       虚拟环境已创建
@@ -38,7 +38,7 @@ if not exist "venv" (
 
 :: Step 3: Install dependencies
 echo.
-echo [3/4] 安装项目依赖...
+echo [3/3] 安装项目依赖...
 call venv\Scripts\activate.bat
 pip install -r requirements.txt -q
 if %errorlevel% neq 0 (
@@ -48,23 +48,11 @@ if %errorlevel% neq 0 (
 )
 echo       依赖安装完成
 
-:: Step 4: Configure .env
-echo.
-echo [4/4] 配置 API Key...
-if not exist ".env" (
-    copy .env.example .env >nul
-    echo       已创建 .env 配置文件
-    echo.
-    echo  !! 重要：请用记事本打开 .env 文件，填入你的 OpenRouter API Key
-    echo     获取地址: https://openrouter.ai/keys
-    echo.
-    notepad .env
-) else (
-    echo       .env 配置文件已存在，跳过
-)
-
 echo.
 echo ============================================
 echo   配置完成！双击 start.bat 启动应用
+echo   首次使用请在网页侧边栏输入 API Key
+echo   获取地址: https://openrouter.ai/keys
+echo   输入一次后会自动保存，下次无需重复输入
 echo ============================================
 pause

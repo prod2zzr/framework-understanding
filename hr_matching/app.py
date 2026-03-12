@@ -1,24 +1,60 @@
 """Streamlit UI for the HR Roster Matching Application."""
 
+import json
 import os
 import tempfile
+from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 import streamlit as st
 import pandas as pd
 from hr_matching.llm.orchestrator import run_query
 
+_CONFIG_DIR = Path.home() / ".hr_matching"
+_CONFIG_FILE = _CONFIG_DIR / "config.json"
+
+
+def _load_saved_key() -> str:
+    """Load API key from local config file."""
+    if _CONFIG_FILE.exists():
+        try:
+            data = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
+            return data.get("api_key", "")
+        except (json.JSONDecodeError, OSError):
+            pass
+    return ""
+
+
+def _save_key(key: str):
+    """Save API key to local config file."""
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _CONFIG_FILE.write_text(
+        json.dumps({"api_key": key}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 st.set_page_config(page_title="HR花名册智能匹配", page_icon="👥", layout="wide")
+
+# Resolve default key: saved file > env var
+_default_key = _load_saved_key() or os.environ.get("OPENROUTER_API_KEY", "")
 
 # --- Sidebar Configuration ---
 with st.sidebar:
     st.header("⚙️ 配置")
     api_key = st.text_input(
         "OpenRouter API Key",
-        value=os.environ.get("OPENROUTER_API_KEY", ""),
+        value=_default_key,
         type="password",
-        help="从 https://openrouter.ai/keys 获取",
+        help="从 https://openrouter.ai/keys 获取，输入后自动保存到本地",
     )
+    # Auto-save when key changes
+    if api_key and api_key != _load_saved_key():
+        _save_key(api_key)
+        st.caption("API Key 已保存，下次无需重新输入")
+    elif api_key:
+        st.caption("API Key 已从本地加载")
+
     model = st.selectbox(
         "选择模型",
         [
@@ -33,7 +69,7 @@ with st.sidebar:
     st.divider()
     st.markdown("### 📖 使用说明")
     st.markdown(
-        "1. 输入 OpenRouter API Key\n"
+        "1. 输入 OpenRouter API Key（仅需一次）\n"
         "2. 上传任意格式的 HR Excel 花名册\n"
         "3. 用自然语言描述你要找的人\n"
         "4. AI 会自动解析、筛选、评分"
