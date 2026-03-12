@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
@@ -13,6 +14,15 @@ _CONFIG_DIR = Path.home() / ".hr_matching"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 _SUPPORTED_EXTENSIONS = {".xlsx", ".xls", ".et", ".csv"}
+
+# Tool display names and estimated execution time (seconds)
+_TOOL_DISPLAY = {
+    "parse_excel":    {"label": "解析花名册文件", "estimate": 2},
+    "analyze_schema": {"label": "识别列名含义",   "estimate": 3},
+    "search_roster":  {"label": "筛选候选人",     "estimate": 2},
+    "score_matches":  {"label": "评分与排名",     "estimate": 3},
+}
+_EXPECTED_STEPS = 5  # typical tool calls in a full query
 
 
 def _load_saved_key() -> str:
@@ -43,6 +53,19 @@ def _scan_data_dir() -> list[Path]:
         if f.suffix.lower() in _SUPPORTED_EXTENSIONS:
             files.append(f)
     return files
+
+
+def _condense_args(args: dict) -> dict:
+    """Condense large args for display."""
+    display = {}
+    for k, v in args.items():
+        if isinstance(v, list) and len(v) > 3:
+            display[k] = f"[...{len(v)} items...]"
+        elif isinstance(v, str) and len(v) > 200:
+            display[k] = v[:200] + "..."
+        else:
+            display[k] = v
+    return display
 
 
 st.set_page_config(page_title="HR花名册智能匹配", page_icon="👥", layout="wide")
@@ -147,40 +170,62 @@ if prompt := st.chat_input("描述你要找的人，例如：帮我找技术部3
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Run LLM query
+    # Run LLM query with progress visualization
     with st.chat_message("assistant"):
-        tool_log = st.expander("🔧 工具调用过程", expanded=False)
-        tool_calls_log = []
+        with st.status("AI 正在分析...", expanded=True) as status:
+            progress_bar = st.progress(0, text="准备中...")
+            step_placeholder = st.empty()
+            detail_container = st.container()
 
-        def on_tool_call(name, args, result):
-            # Show condensed args (don't dump huge data arrays)
-            display_args = {}
-            for k, v in args.items():
-                if isinstance(v, list) and len(v) > 3:
-                    display_args[k] = f"[...{len(v)} items...]"
-                elif isinstance(v, str) and len(v) > 200:
-                    display_args[k] = v[:200] + "..."
-                else:
-                    display_args[k] = v
-            tool_calls_log.append({
-                "tool": name,
-                "args": display_args,
-            })
-            with tool_log:
-                st.markdown(f"**调用工具**: `{name}`")
-                st.json(display_args)
+            step_start_time = None
+            total_start_time = time.time()
 
-        with st.spinner("AI 正在分析花名册..."):
+            def on_tool_start(tool_name, step_num):
+                nonlocal step_start_time
+                step_start_time = time.time()
+                info = _TOOL_DISPLAY.get(tool_name, {"label": tool_name, "estimate": 3})
+                pct = min((step_num - 1) / _EXPECTED_STEPS, 0.95)
+                progress_bar.progress(pct, text=f"步骤 {step_num}/{_EXPECTED_STEPS}")
+                step_placeholder.markdown(
+                    f"**步骤 {step_num}** · {info['label']}... "
+                    f"（预计 {info['estimate']} 秒）"
+                )
+
+            def on_tool_call(tool_name, args, result, step_num):
+                info = _TOOL_DISPLAY.get(tool_name, {"label": tool_name, "estimate": 3})
+                elapsed = time.time() - step_start_time if step_start_time else 0
+                pct = min(step_num / _EXPECTED_STEPS, 0.95)
+                progress_bar.progress(pct, text=f"步骤 {step_num}/{_EXPECTED_STEPS}")
+                step_placeholder.markdown(
+                    f"**步骤 {step_num}** · {info['label']} "
+                    f"({elapsed:.1f}s)"
+                )
+                with detail_container.expander(
+                    f"步骤 {step_num}: {info['label']} ({elapsed:.1f}s)",
+                    expanded=False,
+                ):
+                    st.json(_condense_args(args))
+
             try:
                 response = run_query(
                     user_message=prompt,
                     file_path=file_path,
                     api_key=api_key,
                     model=model,
+                    on_tool_start=on_tool_start,
                     on_tool_call=on_tool_call,
                 )
             except Exception as e:
                 response = f"出错了: {e}"
+
+            total_elapsed = time.time() - total_start_time
+            progress_bar.progress(1.0, text="完成")
+            step_placeholder.markdown(f"**分析完成** · 总耗时 {total_elapsed:.1f} 秒")
+            status.update(
+                label=f"分析完成（{total_elapsed:.1f}s）",
+                state="complete",
+                expanded=False,
+            )
 
         st.markdown(response)
         st.session_state.messages.append({"role": "assistant", "content": response})
