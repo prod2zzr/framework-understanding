@@ -2,6 +2,8 @@
 
 import os
 import tempfile
+from dotenv import load_dotenv
+load_dotenv()
 import streamlit as st
 import pandas as pd
 from hr_matching.llm.orchestrator import run_query
