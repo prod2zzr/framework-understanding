@@ -94,7 +94,16 @@ def execute_pandas(file_path: str, code: str) -> dict:
         except (AttributeError, ValueError):
             pass  # Windows or non-main thread
 
-        exec(code, {"__builtins__": {}}, namespace)
+        _SAFE_BUILTINS = {
+            "len": len, "int": int, "float": float, "str": str, "bool": bool,
+            "list": list, "dict": dict, "tuple": tuple, "set": set,
+            "range": range, "enumerate": enumerate, "zip": zip,
+            "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
+            "sorted": sorted, "reversed": reversed, "filter": filter, "map": map,
+            "any": any, "all": all, "isinstance": isinstance, "type": type,
+            "print": print, "True": True, "False": False, "None": None,
+        }
+        exec(code, {"__builtins__": _SAFE_BUILTINS}, namespace)
 
         # Cancel alarm
         try:

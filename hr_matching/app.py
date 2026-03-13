@@ -21,6 +21,8 @@ _TOOL_DISPLAY = {
     "analyze_schema": {"label": "识别列名含义",   "estimate": 3},
     "search_roster":  {"label": "筛选候选人",     "estimate": 2},
     "score_matches":  {"label": "评分与排名",     "estimate": 3},
+    "execute_pandas": {"label": "执行数据查询",   "estimate": 2},
+    "manage_files":   {"label": "文件管理操作",   "estimate": 1},
 }
 _EXPECTED_STEPS = 5  # typical tool calls in a full query
 

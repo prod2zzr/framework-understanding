@@ -1,7 +1,7 @@
 """Central tool registry: maps tool names to callables and JSON schemas."""
 
 import json
-from hr_matching.tools import parse_excel, analyze_schema, search_roster, score_matches, execute_pandas
+from hr_matching.tools import parse_excel, analyze_schema, search_roster, score_matches, execute_pandas, manage_files
 
 # --- JSON Schema definitions for OpenAI-compatible function calling ---
 
@@ -165,6 +165,43 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_files",
+            "description": (
+                "文件管理工具，支持创建文件夹、列出目录、移动/复制/删除文件等操作。"
+                "所有操作限制在项目目录内，受保护的系统文件不允许删除或覆盖。"
+                "path 参数使用相对于项目根目录的路径，如 'output/reports'。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "create_folder",
+                            "list_dir",
+                            "move",
+                            "copy",
+                            "delete",
+                            "file_info",
+                        ],
+                        "description": "要执行的文件操作类型",
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "目标路径（相对于项目根目录）",
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "目标路径，仅 move 和 copy 操作需要（相对于项目根目录）",
+                    },
+                },
+                "required": ["action", "path"],
+            },
+        },
+    },
 ]
 
 # --- Callable dispatch map ---
@@ -175,6 +212,7 @@ TOOL_CALLABLES = {
     "search_roster": search_roster,
     "score_matches": score_matches,
     "execute_pandas": execute_pandas,
+    "manage_files": manage_files,
 }
 
 
