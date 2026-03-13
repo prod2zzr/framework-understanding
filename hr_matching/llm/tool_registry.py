@@ -1,7 +1,7 @@
 """Central tool registry: maps tool names to callables and JSON schemas."""
 
 import json
-from hr_matching.tools import parse_excel, analyze_schema, search_roster, score_matches
+from hr_matching.tools import parse_excel, analyze_schema, search_roster, score_matches, execute_pandas
 
 # --- JSON Schema definitions for OpenAI-compatible function calling ---
 
@@ -135,6 +135,36 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_pandas",
+            "description": (
+                "执行 pandas 代码对花名册数据进行任意查询、筛选、统计、排名。"
+                "代码中 df 已预加载为 DataFrame（同时可用 pd、re、datetime）。"
+                "必须将最终结果赋值给 result 变量。"
+                "适用于任意表格结构，不受预定义筛选条件限制。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "花名册文件的完整路径",
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": (
+                            "要执行的 pandas Python 代码。df 已加载，"
+                            "将结果赋值给 result 变量。示例：\n"
+                            "result = df[df['部门'] == '技术部'].head(20)"
+                        ),
+                    },
+                },
+                "required": ["file_path", "code"],
+            },
+        },
+    },
 ]
 
 # --- Callable dispatch map ---
@@ -144,6 +174,7 @@ TOOL_CALLABLES = {
     "analyze_schema": analyze_schema,
     "search_roster": search_roster,
     "score_matches": score_matches,
+    "execute_pandas": execute_pandas,
 }
 
 
