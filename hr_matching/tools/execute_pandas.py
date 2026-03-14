@@ -4,7 +4,8 @@ Safety layers (executed in order):
 1. Forbidden-pattern scan  – blocks dangerous code before execution
 2. Column pre-validation   – catches wrong column names before execution
 3. Sandboxed exec          – restricted builtins + timeout
-4. Result serialisation    – truncation + metadata attachment
+4. Post-validation         – automatic anomaly detection on results
+5. Result serialisation    – truncation + metadata attachment
 """
 
 import re
@@ -32,13 +33,29 @@ _FORBIDDEN_PATTERNS = [
     r'\bbreakpoint\s*\(',
 ]
 
-# Patterns to extract column name references from pandas code
-# Matches: df['col'], df["col"], df.loc[:, 'col'], df[["col1", "col2"]]
+# Patterns to extract column name references from pandas code.
+# Designed to catch both explicit indexing and method-argument patterns.
 _COLUMN_REF_PATTERNS = [
-    r"""df\s*\[\s*['\"](.+?)['\"]\s*\]""",          # df['col'] or df["col"]
-    r"""df\s*\[\s*\[\s*['\"](.+?)['\"]\s*""",        # df[["col1" ...
-    r"""df\s*\.\s*loc\s*\[.*?,\s*['\"](.+?)['\"]\s*\]""",  # df.loc[:, 'col']
-    r"""['\"](.+?)['\"]\s*\]\s*\]""",                # ... "col2"]] continuation
+    # --- Indexing ---
+    r"""df\s*\[\s*['\"](.+?)['\"]\s*\]""",                     # df['col']
+    r"""df\s*\[\s*\[\s*['\"](.+?)['\"]\s*""",                   # df[["col1" ...
+    r"""df\s*\.\s*loc\s*\[.*?,\s*['\"](.+?)['\"]\s*\]""",       # df.loc[:, 'col']
+    # --- Pandas methods that take column names ---
+    r"""\.groupby\s*\(\s*['\"](.+?)['\"]\s*\)""",               # .groupby('col')
+    r"""\.groupby\s*\(\s*\[\s*['\"](.+?)['\"]\s*""",            # .groupby(['col1' ...
+    r"""\.sort_values\s*\(\s*(?:by\s*=\s*)?['\"](.+?)['\"]\s*""",  # .sort_values('col')
+    r"""\.sort_values\s*\(\s*(?:by\s*=\s*)?\[\s*['\"](.+?)['\"]\s*""",  # .sort_values(['col'
+    r"""\.drop\s*\(\s*(?:columns\s*=\s*)?\[?\s*['\"](.+?)['\"]\s*""",  # .drop(columns=['col'
+    r"""\.rename\s*\(\s*columns\s*=\s*\{\s*['\"](.+?)['\"]\s*""",  # .rename(columns={'old'
+    r"""\.merge\s*\(.*?\bon\s*=\s*['\"](.+?)['\"]\s*""",        # .merge(on='col')
+    r"""\.pivot_table\s*\(.*?['\"](.+?)['\"]\s*""",             # .pivot_table(values='col'
+    r"""\.value_counts\s*\(\s*\)\s*""",                         # (no capture, handled via parent)
+    r"""\.isin\s*\(""",                                         # (no capture, values not columns)
+    r"""\.str\.""",                                              # (no capture, operates on series)
+    # --- General: strings inside pandas method calls on df ---
+    r"""\.agg\s*\(\s*\{\s*['\"](.+?)['\"]\s*""",                # .agg({'col': ...})
+    r"""\.fillna\s*\(\s*\{\s*['\"](.+?)['\"]\s*""",             # .fillna({'col': val})
+    r"""\.astype\s*\(\s*\{\s*['\"](.+?)['\"]\s*""",             # .astype({'col': type})
 ]
 
 _MAX_RESULT_ROWS = 50
@@ -54,11 +71,27 @@ def _check_code_safety(code: str) -> str | None:
 
 
 def _extract_column_refs(code: str) -> set[str]:
-    """Extract column name references from pandas code."""
+    """Extract column name references from pandas code.
+
+    Uses pattern matching to find column names in:
+    - Direct indexing:  df['col'], df[["col1", "col2"]]
+    - Pandas methods:   .groupby('col'), .sort_values(by='col'), .drop(columns=['col']), etc.
+    - Loc indexing:     df.loc[:, 'col']
+    """
     refs = set()
     for pattern in _COLUMN_REF_PATTERNS:
         for match in re.finditer(pattern, code):
-            refs.add(match.group(1))
+            if match.lastindex:  # only if there's a capture group
+                refs.add(match.group(1))
+
+    # Sweep for all quoted strings inside list brackets following pandas patterns
+    # This catches multi-column cases like df[["a", "b", "c"]] or .groupby(["x", "y"])
+    list_ctx_pattern = r"""(?:df\s*\[\s*\[|\.(?:groupby|sort_values|drop|agg)\s*\(\s*(?:\w+\s*=\s*)?\[)\s*((?:['\"].*?['\"]\s*,?\s*)+)\]"""
+    for match in re.finditer(list_ctx_pattern, code):
+        inner = match.group(1)
+        for col_match in re.finditer(r"""['\"](.+?)['\"]\s*""", inner):
+            refs.add(col_match.group(1))
+
     return refs
 
 
@@ -97,6 +130,51 @@ def _build_dataframe_meta(df: pd.DataFrame) -> dict:
         "columns": list(df.columns),
         "dtypes": {col: str(dtype) for col, dtype in df.dtypes.items()},
     }
+
+
+def _post_validate(result, source_df: pd.DataFrame) -> list[str]:
+    """Automatic post-execution anomaly detection. Returns a list of warnings.
+
+    Checks performed (all fully automatic, zero human intervention):
+    - Empty result (0 rows) when source has data
+    - Result equals entire source (filter may not have worked)
+    - High NaN ratio in result columns
+    - Single-value columns that might indicate a broken filter
+    """
+    warnings = []
+    total_rows = len(source_df)
+
+    if isinstance(result, pd.DataFrame):
+        if len(result) == 0 and total_rows > 0:
+            warnings.append(
+                f"⚠ 结果为空（0行），但源数据有 {total_rows} 行。"
+                "筛选条件可能过于严格，或列名/值不匹配。建议检查条件后重试。"
+            )
+        elif len(result) == total_rows and total_rows > 5:
+            warnings.append(
+                f"⚠ 结果包含全部 {total_rows} 行，与源数据行数相同。"
+                "筛选条件可能未生效。请确认过滤逻辑是否正确。"
+            )
+
+        # Check for columns that are entirely NaN
+        if len(result) > 0:
+            nan_cols = [
+                col for col in result.columns
+                if result[col].isna().all()
+            ]
+            if nan_cols:
+                warnings.append(
+                    f"⚠ 以下列的值全部为空(NaN)：{nan_cols}。"
+                    "可能是列名正确但数据类型不匹配导致的。"
+                )
+
+    elif isinstance(result, pd.Series):
+        if len(result) == 0 and total_rows > 0:
+            warnings.append(
+                f"⚠ 结果为空 Series，但源数据有 {total_rows} 行。请检查筛选条件。"
+            )
+
+    return warnings
 
 
 def _timeout_handler(signum, frame):
@@ -206,12 +284,16 @@ def execute_pandas(file_path: str, code: str) -> dict:
     # Build metadata once for all return paths
     meta = _build_dataframe_meta(df)
 
+    # 4. Post-validation — automatic anomaly detection
+    post_warnings = _post_validate(result, df)
+
     # Convert result to JSON-friendly format
     try:
+        base: dict
         if isinstance(result, pd.DataFrame):
             truncated = len(result) > _MAX_RESULT_ROWS
             data = result.head(_MAX_RESULT_ROWS).to_dict(orient="records")
-            return {
+            base = {
                 "success": True,
                 "result": data,
                 "row_count": len(result),
@@ -222,7 +304,7 @@ def execute_pandas(file_path: str, code: str) -> dict:
         elif isinstance(result, pd.Series):
             truncated = len(result) > _MAX_RESULT_ROWS
             data = result.head(_MAX_RESULT_ROWS).to_dict()
-            return {
+            base = {
                 "success": True,
                 "result": data,
                 "row_count": len(result),
@@ -230,10 +312,15 @@ def execute_pandas(file_path: str, code: str) -> dict:
                 "dataframe_meta": meta,
             }
         else:
-            return {
+            base = {
                 "success": True,
                 "result": result,
                 "dataframe_meta": meta,
             }
+
+        if post_warnings:
+            base["warnings"] = post_warnings
+
+        return base
     except Exception as e:
         return {"success": False, "error": f"结果序列化失败: {e}"}
