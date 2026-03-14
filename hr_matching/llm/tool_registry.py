@@ -5,6 +5,7 @@ from hr_matching.tools import (
     parse_excel, analyze_schema, search_roster, score_matches,
     execute_pandas, manage_files,
     create_archive, read_reference, save_profile,
+    load_knowledge,
 )
 
 # --- JSON Schema definitions for OpenAI-compatible function calling ---
@@ -296,6 +297,28 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_knowledge",
+            "description": (
+                "加载领域知识文件（.md格式），如职称评审条件、学历认定规则等。"
+                "知识文件存放在 knowledge/ 目录中，由 HR 维护，与代码解耦。"
+                "不指定 topic 时返回所有可用主题列表；指定 topic 时返回匹配的知识内容。"
+                "当用户查询涉及专业判断标准（如职称评审、岗位匹配、资格认定）时应主动加载相关知识。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "知识主题关键词（如'职称'、'学历'、'岗位'）。不指定则列出所有可用主题。",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
 ]
 
 # --- Callable dispatch map ---
@@ -310,6 +333,7 @@ TOOL_CALLABLES = {
     "create_archive": create_archive,
     "read_reference": read_reference,
     "save_profile": save_profile,
+    "load_knowledge": load_knowledge,
 }
 
 
