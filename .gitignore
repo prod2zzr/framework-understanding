@@ -8,3 +8,5 @@ data/*.xls
 data/*.et
 data/*.csv
 !data/.gitkeep
+archives/*/
+!archives/.gitkeep

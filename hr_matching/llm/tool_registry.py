@@ -1,7 +1,11 @@
 """Central tool registry: maps tool names to callables and JSON schemas."""
 
 import json
-from hr_matching.tools import parse_excel, analyze_schema, search_roster, score_matches, execute_pandas, manage_files
+from hr_matching.tools import (
+    parse_excel, analyze_schema, search_roster, score_matches,
+    execute_pandas, manage_files,
+    create_archive, read_reference, save_profile,
+)
 
 # --- JSON Schema definitions for OpenAI-compatible function calling ---
 
@@ -202,6 +206,93 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_archive",
+            "description": (
+                "为员工创建档案目录结构，包含专业技术档案和教育培训档案两个子目录，"
+                "每个子目录下有 reference/ 文件夹供 HR 放入证明材料。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "employee_id": {
+                        "type": "string",
+                        "description": "员工工号（如 EMP001）",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "员工姓名",
+                    },
+                },
+                "required": ["employee_id", "name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_reference",
+            "description": (
+                "读取员工档案中的参考材料。PDF 提取文本，图片返回 base64 供视觉理解，"
+                "Excel/CSV 解析为表格，txt/md 直接读取。自动跳过 memory.md 中已标记的已处理文件。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "archive_path": {
+                        "type": "string",
+                        "description": "员工档案相对路径（如 archives/EMP001_张三）",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["professional", "education"],
+                        "description": "档案类别：professional（专业技术）或 education（教育培训）。不指定则两个都读取。",
+                    },
+                },
+                "required": ["archive_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_profile",
+            "description": (
+                "保存 LLM 生成的员工档案文件（profile.md 叙述档案 + profile.json 结构化数据），"
+                "并更新 memory.md 处理记录。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "archive_path": {
+                        "type": "string",
+                        "description": "员工档案相对路径（如 archives/EMP001_张三）",
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["professional", "education"],
+                        "description": "档案类别",
+                    },
+                    "profile_md": {
+                        "type": "string",
+                        "description": "Markdown 格式的叙述性档案内容（时间线、成就、评估）",
+                    },
+                    "profile_json": {
+                        "type": "string",
+                        "description": "JSON 格式的结构化档案数据（高维嵌套，支持经历→子项目→技能→关联关系）",
+                    },
+                    "processed_files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "本次处理的参考材料文件名列表",
+                    },
+                },
+                "required": ["archive_path", "category", "profile_md", "profile_json", "processed_files"],
+            },
+        },
+    },
 ]
 
 # --- Callable dispatch map ---
@@ -213,6 +304,9 @@ TOOL_CALLABLES = {
     "score_matches": score_matches,
     "execute_pandas": execute_pandas,
     "manage_files": manage_files,
+    "create_archive": create_archive,
+    "read_reference": read_reference,
+    "save_profile": save_profile,
 }
 
 

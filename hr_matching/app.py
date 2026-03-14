@@ -22,7 +22,10 @@ _TOOL_DISPLAY = {
     "search_roster":  {"label": "筛选候选人",     "estimate": 2},
     "score_matches":  {"label": "评分与排名",     "estimate": 3},
     "execute_pandas": {"label": "执行数据查询",   "estimate": 2},
-    "manage_files":   {"label": "文件管理操作",   "estimate": 1},
+    "manage_files":    {"label": "文件管理操作",   "estimate": 1},
+    "create_archive":  {"label": "创建员工档案",   "estimate": 1},
+    "read_reference":  {"label": "读取参考材料",   "estimate": 3},
+    "save_profile":    {"label": "保存档案文件",   "estimate": 2},
 }
 _EXPECTED_STEPS = 5  # typical tool calls in a full query
 
@@ -107,6 +110,10 @@ with st.sidebar:
         "你的**数字分身**会自动分析花名册的结构，"
         "调用工具编写程序帮你分析和决策。\n\n"
         "所有数据始终在本地处理，不会上传到任何服务器。"
+    )
+    st.caption(
+        "建议选择具有视觉理解和编程能力的模型（如 Claude Sonnet、GPT-4o），"
+        "以便读懂证书、学历等图片材料"
     )
     st.divider()
     st.markdown("### 📖 使用说明")

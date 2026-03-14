@@ -4,3 +4,4 @@ from .search_roster import search_roster
 from .score_matches import score_matches
 from .execute_pandas import execute_pandas
 from .file_manager import manage_files
+from .employee_archive import create_archive, read_reference, save_profile
