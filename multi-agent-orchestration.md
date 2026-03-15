@@ -449,8 +449,9 @@ Step 5: 裁判（人类最终收敛）
 | 6 | [post-model-competition-landscape.md](post-model-competition-landscape.md) | 模型能力趋同后，什么决定竞争胜负？ |
 | 7 | [convergence-as-capability.md](convergence-as-capability.md) | 人类在 AI 时代的不可替代角色是什么？ |
 | 8 | [multi-agent-orchestration.md](multi-agent-orchestration.md)（本文） | 如何编排多个 AI 协作与竞争？ |
+| 9 | [nezha-mode.md](nezha-mode.md) | 如何实现"一键发送"的端到端工作流？ |
 
-**系列统一论点**：从单个工具的架构 → 工具间对比 → 竞争格局 → 人类角色 → 多智能体编排。所有分析收敛到一个结论：**人类的收敛判断——无论是为单个 AI 准备上下文，还是为多个 AI 编排协作与竞争——是整个系统的瓶颈和杠杆点。**
+**系列统一论点**：从单个工具的架构 → 工具间对比 → 竞争格局 → 人类角色 → 多智能体编排 → 端到端实操。所有分析收敛到一个结论：**人类的收敛判断——无论是为单个 AI 准备上下文，还是为多个 AI 编排协作与竞争——是整个系统的瓶颈和杠杆点。**
 
 ---
 
