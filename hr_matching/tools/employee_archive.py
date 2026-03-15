@@ -103,6 +103,17 @@ def _read_pdf(file_path: Path) -> str:
         return f"(PDF读取失败: {e})"
 
 
+def _read_docx(file_path: Path) -> str:
+    """Extract text from a .docx file."""
+    try:
+        from docx import Document
+        doc = Document(str(file_path))
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        return "\n\n".join(paragraphs) if paragraphs else "(Word文档无可提取文本)"
+    except Exception as e:
+        return f"(Word文档读取失败: {e})"
+
+
 def _read_image_base64(file_path: Path) -> str:
     """Read image file and return base64 encoded string."""
     data = file_path.read_bytes()

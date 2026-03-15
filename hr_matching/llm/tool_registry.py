@@ -5,7 +5,7 @@ from hr_matching.tools import (
     parse_excel, analyze_schema, search_roster, score_matches,
     execute_pandas, manage_files,
     create_archive, read_reference, save_profile,
-    load_knowledge,
+    load_knowledge, read_policy, save_knowledge,
 )
 
 # --- JSON Schema definitions for OpenAI-compatible function calling ---
@@ -319,6 +319,52 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_policy",
+            "description": (
+                "读取制度文件（.pdf/.docx/.txt/.md），提取全文文本内容。"
+                "用于让 LLM 理解企业制度后生成知识库文件。"
+                "返回文件内容和格式提示，LLM 应据此生成结构化 .md 知识文件。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "制度文件的路径（支持 .pdf、.docx、.txt、.md）",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_knowledge",
+            "description": (
+                "将 LLM 生成的知识内容保存为 .md 文件到 knowledge/ 目录。"
+                "如果同名文件已存在，自动备份旧版本。"
+                "保存后可通过 load_knowledge 在后续查询中自动加载使用。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "知识主题名称，将作为文件名（如'职称评审条件'→ 职称评审条件.md）",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Markdown 格式的知识内容（包含标题、适用场景、具体规则、注意事项）",
+                    },
+                },
+                "required": ["topic", "content"],
+            },
+        },
+    },
 ]
 
 # --- Callable dispatch map ---
@@ -334,6 +380,8 @@ TOOL_CALLABLES = {
     "read_reference": read_reference,
     "save_profile": save_profile,
     "load_knowledge": load_knowledge,
+    "read_policy": read_policy,
+    "save_knowledge": save_knowledge,
 }
 
 
