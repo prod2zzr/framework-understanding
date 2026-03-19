@@ -12,6 +12,11 @@ description: 用 Agent Teams 并行生成完整的 Cowork 上下文架构（CLAU
 - **三头六臂**（Phase 2）：4 个 Sub-Agent 并行生成配置文件
 - **收敛**（Phase 3）：验证所有输出，生成交接清单
 
+**Compact 防护**：
+- Phase 1 完成后、启动 Sub-Agent 之前，主动执行 `/compact`，焦点为："保留完整的 Scan Context（含用户目标摘要和用户标注）以及待执行的 Phase 2 并行任务清单"
+- Sub-Agent 天然拥有独立上下文窗口，不受主 Agent compact 影响——这是并行架构的内置优势
+- 每个 Sub-Agent 的 prompt 中包含完整 Scan Context 副本，确保即使主 Agent 被 compact，Sub-Agent 的输入不受损
+
 ---
 
 ## Phase 1/3：千里眼 — 目标收敛 + 项目扫描 + 共享上下文生成
@@ -133,6 +138,14 @@ Agent(
   - 目标 2000-5000 字，绝对不超过 10,000 字
   - 写入后用 wc -c CLAUDE.md 验证
   - 若已有 CLAUDE.md，追加而非覆盖（在末尾添加新内容）
+  - 在生成的 CLAUDE.md 末尾添加以下章节：
+
+    ## Compact Instructions
+    压缩时必须保留：
+    - 用户目标摘要（主要用途、典型场景、核心痛点）
+    - 当前任务的完整计划和进度状态
+    - 已修改文件的完整列表
+    - context/ 目录中各文件的核心要点
 
   ## 输出
   完成后报告：文件路径、字符数、主要章节列表。
