@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+venv/
+tools/*.exe
+data/*.xlsx
+data/*.xls
+data/*.et
+data/*.csv
+!data/.gitkeep
+archives/*/
+!archives/.gitkeep
