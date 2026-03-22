@@ -14,6 +14,10 @@
 
 > "运行：`curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash -s -- quickstart`"
 
+### 指定分支安装（代码未合并到 main 时使用）
+
+> "运行：`curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/<branch>/install-skills.sh | bash -s -- --branch <branch>`"
+
 ### 查看可用 skills
 
 > "运行：`curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash -s -- --list`"

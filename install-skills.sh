@@ -5,12 +5,15 @@
 #   curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash
 #   curl -sL ... | bash -s -- quickstart               # 只安装指定 skill
 #   curl -sL ... | bash -s -- quickstart quick-framework # 安装多个
+#   curl -sL ... | bash -s -- --branch <branch-name>   # 指定分支
 #   curl -sL ... | bash -s -- --list                    # 列出可用 skills
+#   INSTALL_SKILLS_BRANCH=dev curl -sL ... | bash       # 环境变量指定分支
 # ============================================================
 
 set -euo pipefail
 
 REPO_URL="https://github.com/prod2zzr/framework-understanding.git"
+BRANCH="${INSTALL_SKILLS_BRANCH:-main}"
 GLOBAL_SKILLS_DIR="${HOME}/.claude/skills"
 TMP_DIR=""
 
@@ -89,6 +92,13 @@ install_skill() {
 
 # ---- main ----
 
+# 处理 --branch 参数
+if [[ "${1:-}" == "--branch" ]]; then
+  [[ -z "${2:-}" ]] && error "用法: --branch <branch-name>"
+  BRANCH="$2"
+  shift 2
+fi
+
 # 处理 --list
 if [[ "${1:-}" == "--list" ]]; then
   list_skills
@@ -107,9 +117,9 @@ echo ""
 
 # 克隆仓库到临时目录
 TMP_DIR="$(mktemp -d)"
-info "克隆仓库到临时目录..."
-git clone --depth 1 --single-branch "${REPO_URL}" "${TMP_DIR}" 2>/dev/null \
-  || error "克隆仓库失败，请检查网络连接"
+info "克隆仓库到临时目录 (分支: ${BRANCH})..."
+git clone --depth 1 --single-branch --branch "${BRANCH}" "${REPO_URL}" "${TMP_DIR}" 2>/dev/null \
+  || error "克隆仓库失败，请检查网络连接或分支名是否正确: ${BRANCH}"
 
 # 创建全局 skills 目录
 mkdir -p "${GLOBAL_SKILLS_DIR}"
