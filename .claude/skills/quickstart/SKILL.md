@@ -6,6 +6,7 @@ description: >
   "帮我启动项目"、"start new project"时触发。
 argument-hint: "[项目名称] [--research|--code|--document]"
 allowed-tools: Bash(mkdir *), Bash(tree *), Bash(git init), Bash(wc *), Read, Write, WebFetch, WebSearch, Glob
+effort: high
 ---
 
 # Quickstart — 项目快速启动器
@@ -81,9 +82,9 @@ git init
 ```
 
 根据模板类型，读取对应模板文件获取目录结构：
-- 研究型 → 读取 [templates/research.md](templates/research.md)
-- 代码型 → 读取 [templates/code.md](templates/code.md)
-- 文档型 → 读取 [templates/document.md](templates/document.md)
+- 研究型 → 用 Read 读取 `${CLAUDE_SKILL_DIR}/templates/research.md`
+- 代码型 → 用 Read 读取 `${CLAUDE_SKILL_DIR}/templates/code.md`
+- 文档型 → 用 Read 读取 `${CLAUDE_SKILL_DIR}/templates/document.md`
 - 自定义 → 按用户指定的结构创建
 
 按模板创建子目录。
@@ -150,7 +151,7 @@ type: [article|repo|docs|other]
 
 ### 生成 CLAUDE.md
 
-读取 [references/claude-md-template.md](references/claude-md-template.md) 获取模板。
+用 Read 读取 `${CLAUDE_SKILL_DIR}/references/claude-md-template.md` 获取模板。
 
 基于以下信息填充模板：
 - 项目名称和描述（Phase 1）
@@ -170,7 +171,7 @@ type: [article|repo|docs|other]
 ```bash
 git init
 git add -A
-git commit -m "Initial project setup via /quickstart"
+git commit -m "Initial project setup via /quickstart (session: ${CLAUDE_SESSION_ID})"
 ```
 
 ---
