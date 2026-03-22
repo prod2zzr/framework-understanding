@@ -9,6 +9,7 @@
 | 能力 | Dispatch | Code --remote | OpenClaw |
 |------|----------|---------------|----------|
 | curl 安装 skill | ❌ 无法执行 | ✅ 全局安装可行 | ✅ |
+| curl 升级 skill | ❌ | ✅ --update 可用 | ✅ |
 | 搜索已安装 skills | ❌ 搜不到 | ✅ | ✅ |
 | 项目目录外创建文件夹 | ❌ | ❌ 受限于项目目录 | ✅ |
 | 启动 skill（如 /quickstart） | ❌ 无法启动 | ✅ 可启动 | ✅ |
@@ -68,6 +69,28 @@ curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/<bra
 
 # 查看可用 skills
 curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash -s -- --list
+```
+
+#### 升级与管理命令
+
+```
+# 查看已安装 skills 的状态
+curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash -s -- --status
+
+# 升级所有已安装的 skills
+curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash -s -- --update
+
+# 只升级指定 skill
+curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash -s -- --update quickstart
+
+# 从指定分支升级（用于测试未合并的更新）
+curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/<branch>/install-skills.sh | bash -s -- --branch <branch> --update
+
+# 卸载所有 skills
+curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash -s -- --uninstall
+
+# 卸载指定 skill
+curl -sL https://raw.githubusercontent.com/prod2zzr/framework-understanding/main/install-skills.sh | bash -s -- --uninstall quickstart
 ```
 
 ### 方法 3：Dispatch（目前不可用）
