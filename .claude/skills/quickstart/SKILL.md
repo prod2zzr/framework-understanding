@@ -4,7 +4,7 @@ description: >
   一键启动新项目——选模板、收集资料、建目录、整理上下文，消除启动摩擦。
   当用户说"开个新项目"、"quickstart"、"新建项目"、"我要开始一个新项目"、
   "帮我启动项目"、"start new project"时触发。
-argument-hint: "[项目名称] [--research|--code|--document]"
+argument-hint: "[描述你要做什么，可附 URL]"
 allowed-tools: Bash(mkdir *), Bash(tree *), Bash(git init), Bash(wc *), Read, Write, WebFetch, WebSearch, Glob
 effort: high
 ---
@@ -26,28 +26,32 @@ effort: high
 
 用户输入的参数：`$ARGUMENTS`
 
-**解析规则**：
+**解析规则**（按优先级）：
 
-1. 第一个非 `--` 开头的词 → 项目名称
-2. `--research` 或 `--研究` → 研究型模板
-3. `--code` 或 `--代码` → 代码型模板
-4. `--document` 或 `--文档` → 文档型模板
-5. 以 `http://` 或 `https://` 开头的词 → URL 资料
-6. 以 `/` 或 `~/` 开头的词 → 本地文件路径
+1. `--research` / `--code` / `--document` → 明确指定模板（兼容桌面端习惯）
+2. 自然语言关键词自动推断模板：
+   - 含"研究/调研/分析/对比/论文/survey/compare" → 研究型
+   - 含"代码/app/应用/工具/api/web/开发/build/dev" → 代码型
+   - 含"报告/文档/方案/提案/手册/写作/write/report" → 文档型
+3. 以 `http://` 或 `https://` 开头的词 → URL 资料（自动抓取）
+4. 以 `/` 或 `~/` 开头的词 → 本地文件路径
+5. 其余文本 → 项目名称和描述（取前 3 个非关键词作项目名，用连字符连接）
 
 **示例**：
-- `/quickstart ai-landscape --research` → 项目名=ai-landscape, 模板=研究型
+- `/quickstart 调研 AI Agent 框架` → 项目名=ai-agent-frameworks, 模板=研究型, 零交互
 - `/quickstart myapp --code https://docs.example.com` → 项目名=myapp, 模板=代码型, 附带 URL
-- `/quickstart` → 无参数，进入交互模式
+- `/quickstart 写一份技术方案` → 项目名=tech-proposal, 模板=文档型, 零交互
+- `/quickstart` → 无参数，进入交互模式（最多 1 轮）
 
-### 交互模式（$ARGUMENTS 为空或缺少信息时）
+### 快速模式（$ARGUMENTS 已含项目名 + 可推断模板时）
 
-用 AskUserQuestion 一次性收集缺失信息：
+**跳过所有交互**，直接进入 Phase 2。
 
-**问题 1**（若缺项目名）：项目名称和简述
-> 例如："ai-landscape — 调研 2026 年 AI 开发工具格局"
+### 交互模式（$ARGUMENTS 为空或无法推断模板时）
 
-**问题 2**（若缺模板）：选择项目模板
+用 AskUserQuestion 问**一个**问题：
+
+**问题**：选择项目模板
 
 | 选项 | 适用场景 |
 |------|---------|
@@ -56,14 +60,7 @@ effort: high
 | 文档型 | 写报告、方案、提案、手册 |
 | 自定义 | 以上都不合适，自己指定 |
 
-**问题 3**：你有哪些现成资料？（多选）
-
-| 选项 | 说明 |
-|------|------|
-| 网页链接 | GitHub 仓库、官方文档、博客 |
-| 本地文件 | PDF、Word、已有的 .md 文件 |
-| 关键词搜索 | 想让 AI 先搜索了解的主题 |
-| 暂时没有 | 先建好目录，资料后面再加 |
+若项目名也缺失，从用户的回复中提取关键词作为项目名。
 
 **等待用户回复后继续。**
 
@@ -140,10 +137,7 @@ type: [article|repo|docs|other]
 | [文件名] | [URL/路径] | [类型] | [一句话摘要] |
 ```
 
-完成后向用户汇报：
-> "已收集 [N] 份资料，共约 [X] 字。还需补充吗？确认后开始配置。"
-
-**等待用户确认。**
+完成后**自动继续** Phase 3（不等待确认，减少交互轮次）。
 
 ---
 
@@ -178,21 +172,20 @@ git commit -m "Initial project setup via /quickstart (session: ${CLAUDE_SESSION_
 
 ## Phase 4/4：启动确认
 
-用 Bash 执行 `tree -L 2` 展示目录结构，然后输出：
+输出紧凑摘要（手机一屏可读）：
 
 ```markdown
-## 项目已就绪
+## [项目名] 已就绪
 
-**项目路径**：[完整路径]
-**模板类型**：[研究型/代码型/文档型]
-**收集资料**：[N] 份，约 [X] 字
-**配置文件**：CLAUDE.md, .claudeignore, .gitignore
+[模板类型] | [N] 份资料 | `[项目路径]`
 
-### 下一步
-1. 在 Claude Code / Cowork 中打开此文件夹即可开始工作
-2. 若需更精细的配置，运行 `/framework-understanding`
-3. references/ 中的资料已整理好，Claude 可直接引用
+目录：references/ analysis/ notes/ （根据实际模板列出）
+配置：CLAUDE.md .claudeignore .gitignore
+
+下一步：打开此文件夹开始工作，或 `/framework-understanding` 深度配置
 ```
+
+**不要**执行 `tree` 命令输出完整目录树——用一行列出主要子目录名即可。
 
 ---
 
