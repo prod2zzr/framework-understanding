@@ -150,7 +150,65 @@ show_status() {
 
   echo ""
   info "已安装: ${installed}/${total}"
+
+  # 检查权限
+  local settings="${HOME}/.claude/settings.json"
+  if [[ -f "$settings" ]] && grep -q '"Skill"' "$settings"; then
+    ok "Skill 权限: 已配置"
+  else
+    warn "Skill 权限: 未配置（运行安装命令可自动添加）"
+  fi
   echo ""
+}
+
+ensure_skill_permission() {
+  local settings="${HOME}/.claude/settings.json"
+
+  # 不存在 → 创建
+  if [[ ! -f "$settings" ]]; then
+    mkdir -p "$(dirname "$settings")"
+    cat > "$settings" <<'JSON'
+{
+    "permissions": {
+        "allow": ["Skill"]
+    }
+}
+JSON
+    ok "已创建 settings.json 并添加 Skill 权限"
+    return
+  fi
+
+  # 已有 Skill 权限 → 跳过
+  if grep -q '"Skill"' "$settings"; then
+    info "Skill 权限已存在"
+    return
+  fi
+
+  # 存在但没 Skill → 用 python3 安全修改 JSON
+  if command -v python3 &>/dev/null; then
+    python3 -c "
+import json
+path = '$settings'
+with open(path) as f:
+    data = json.load(f)
+data.setdefault('permissions', {}).setdefault('allow', [])
+if 'Skill' not in data['permissions']['allow']:
+    data['permissions']['allow'].append('Skill')
+with open(path, 'w') as f:
+    json.dump(data, f, indent=4, ensure_ascii=False)
+    f.write('\n')
+"
+    ok "已在 settings.json 中添加 Skill 权限"
+  elif command -v jq &>/dev/null; then
+    local tmp
+    tmp=$(mktemp)
+    jq '.permissions.allow += ["Skill"] | .permissions.allow |= unique' "$settings" > "$tmp" \
+      && mv "$tmp" "$settings"
+    ok "已在 settings.json 中添加 Skill 权限"
+  else
+    warn "无法自动修改 settings.json（需要 python3 或 jq）"
+    info "请手动添加 \"Skill\" 到 ${settings} 的 permissions.allow 数组"
+  fi
 }
 
 clone_repo() {
@@ -237,6 +295,11 @@ do_install() {
     fi
   done
 
+  # 配置 Skill 权限
+  if [[ $installed -gt 0 ]]; then
+    ensure_skill_permission
+  fi
+
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   ok "安装完成: ${installed} 个成功, ${failed} 个跳过"
@@ -265,6 +328,9 @@ do_uninstall() {
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   ok "卸载完成: ${removed} 个已移除, ${failed} 个跳过"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  if [[ $removed -gt 0 ]]; then
+    info "如需移除 Skill 权限，请编辑 ~/.claude/settings.json"
+  fi
   echo ""
 }
 
