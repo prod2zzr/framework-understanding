@@ -1,9 +1,16 @@
 """Parse contract documents (.pdf, .docx, .txt) into structured sections."""
 
+import logging
 import re
 from pathlib import Path
 
 from contract_reviewer.models.contract import Contract, Section
+
+logger = logging.getLogger(__name__)
+
+
+class ParseError(Exception):
+    """Raised when a contract file cannot be parsed."""
 
 
 class ContractParser:
@@ -19,10 +26,26 @@ class ContractParser:
         re.compile(r"^Section\s+\d+", re.IGNORECASE),  # Section 1
     ]
 
+    # Minimum extractable text length to consider a PDF valid
+    MIN_TEXT_LENGTH = 50
+
     def parse(self, file_path: str) -> Contract:
-        """Parse a contract file into a Contract object."""
+        """Parse a contract file into a Contract object.
+
+        Raises ParseError if the file cannot be read or contains no extractable text.
+        """
         path = Path(file_path)
+        if not path.exists():
+            raise ParseError(f"File not found: {file_path}")
+
         text = self._extract_text(path)
+        if len(text.strip()) < self.MIN_TEXT_LENGTH:
+            raise ParseError(
+                f"Extracted text too short ({len(text.strip())} chars). "
+                f"The file may be a scanned PDF or image-only document. "
+                f"Please provide a text-based document or OCR the file first."
+            )
+
         sections = self._split_sections(text)
 
         return Contract(
@@ -40,41 +63,57 @@ class ContractParser:
         elif suffix == ".docx":
             return self._parse_docx(path)
         elif suffix in (".txt", ".md"):
-            return path.read_text(encoding="utf-8")
+            return self._read_text_file(path)
         else:
-            raise ValueError(f"Unsupported file format: {suffix}")
+            raise ParseError(f"Unsupported file format: {suffix}")
+
+    def _read_text_file(self, path: Path) -> str:
+        """Read a text file, trying multiple encodings."""
+        for encoding in ("utf-8", "gb18030", "gbk", "latin-1"):
+            try:
+                return path.read_text(encoding=encoding)
+            except (UnicodeDecodeError, ValueError):
+                continue
+        raise ParseError(f"Cannot decode {path.name} with any supported encoding")
 
     def _parse_pdf(self, path: Path) -> str:
         import pdfplumber
 
-        with pdfplumber.open(path) as pdf:
-            pages = []
-            for page in pdf.pages:
-                text = page.extract_text() or ""
-                # Also extract tables as text
-                for table in page.extract_tables():
-                    rows = []
-                    for row in table:
-                        cells = [str(c or "") for c in row]
-                        rows.append(" | ".join(cells))
-                    text += "\n" + "\n".join(rows)
-                pages.append(text)
-            return "\n\n".join(pages)
+        try:
+            with pdfplumber.open(path) as pdf:
+                pages = []
+                for page in pdf.pages:
+                    text = page.extract_text() or ""
+                    # Also extract tables as text
+                    tables = page.extract_tables() or []
+                    for table in tables:
+                        rows = []
+                        for row in table:
+                            cells = [str(c or "") for c in row]
+                            rows.append(" | ".join(cells))
+                        text += "\n" + "\n".join(rows)
+                    pages.append(text)
+                return "\n\n".join(pages)
+        except Exception as e:
+            raise ParseError(f"Failed to parse PDF {path.name}: {e}") from e
 
     def _parse_docx(self, path: Path) -> str:
-        import docx
+        try:
+            import docx
 
-        doc = docx.Document(str(path))
-        paragraphs = []
-        for para in doc.paragraphs:
-            if para.text.strip():
-                paragraphs.append(para.text)
-        # Also extract tables
-        for table in doc.tables:
-            for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells]
-                paragraphs.append(" | ".join(cells))
-        return "\n\n".join(paragraphs)
+            doc = docx.Document(str(path))
+            paragraphs = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    paragraphs.append(para.text)
+            # Also extract tables
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells]
+                    paragraphs.append(" | ".join(cells))
+            return "\n\n".join(paragraphs)
+        except Exception as e:
+            raise ParseError(f"Failed to parse DOCX {path.name}: {e}") from e
 
     def _split_sections(self, text: str) -> list[Section]:
         """Split text into sections by detecting clause/article boundaries."""

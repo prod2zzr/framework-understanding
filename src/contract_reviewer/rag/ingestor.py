@@ -2,11 +2,14 @@
 
 import hashlib
 import json
+import logging
 import re
 from pathlib import Path
 
-from contract_reviewer.rag.embedder import Embedder
+from contract_reviewer.rag.embedder import Embedder, EmbeddingError
 from contract_reviewer.rag.vectorstore import VectorStore
+
+logger = logging.getLogger(__name__)
 
 
 MANIFEST_FILE = ".manifest.json"
@@ -36,7 +39,15 @@ class KnowledgeIngestor:
             if manifest.get(rel_path) == file_hash:
                 continue  # File unchanged, skip
 
-            text = file_path.read_text(encoding="utf-8")
+            try:
+                text = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                try:
+                    text = file_path.read_text(encoding="gb18030")
+                except Exception:
+                    logger.warning("Cannot decode %s, skipping", rel_path)
+                    continue
+
             chunks = self._chunk_legal_text(text, source_type, file_path.stem)
 
             if chunks:
@@ -44,18 +55,23 @@ class KnowledgeIngestor:
                 texts = [c["text"] for c in chunks]
                 metadatas = [c["metadata"] for c in chunks]
 
-                embeddings = await self.embedder.embed(texts)
-                self.vectorstore.add(
-                    ids=ids,
-                    embeddings=embeddings,
-                    documents=texts,
-                    metadatas=metadatas,
-                )
-                added += len(chunks)
+                try:
+                    embeddings = await self.embedder.embed(texts)
+                    self.vectorstore.add(
+                        ids=ids,
+                        embeddings=embeddings,
+                        documents=texts,
+                        metadatas=metadatas,
+                    )
+                    added += len(chunks)
+                except (EmbeddingError, Exception) as e:
+                    logger.error("Failed to ingest %s: %s", rel_path, e)
+                    continue  # Don't update manifest for failed files
 
+            # Update manifest and save immediately after each successful file
             manifest[rel_path] = file_hash
+            self._save_manifest(manifest_path, manifest)
 
-        self._save_manifest(manifest_path, manifest)
         return added
 
     def _chunk_legal_text(

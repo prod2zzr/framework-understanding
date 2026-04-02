@@ -6,9 +6,9 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from contract_reviewer.llm.client import LLMClient
+from contract_reviewer.llm.client import LLMClient, LLMError
 from contract_reviewer.models.config import Settings
 from contract_reviewer.models.contract import Contract, ContractChunk
 from contract_reviewer.models.progress import ProgressEvent
@@ -83,13 +83,15 @@ class ReviewEngine:
         active_dims = dimensions or self.settings.review_dimensions
         system_prompt = self.prompt_builder.build_system_prompt()
 
-        # Run dimensions concurrently
+        # Run dimensions concurrently — track which dims actually run
+        run_dims: list[str] = []
         tasks = []
         for dim_name in active_dims:
             if dim_name not in DIMENSIONS:
                 logger.warning("Unknown dimension: %s, skipping", dim_name)
                 continue
             dim_spec = DIMENSIONS[dim_name]
+            run_dims.append(dim_name)
             tasks.append(
                 self._run_dimension(
                     contract, dim_spec, system_prompt, on_progress
@@ -98,9 +100,9 @@ class ReviewEngine:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Assemble report
+        # Assemble report — zip with run_dims (not active_dims) to stay aligned
         dim_results: dict[str, DimensionResult] = {}
-        for dim_name, result in zip(active_dims, results):
+        for dim_name, result in zip(run_dims, results):
             if isinstance(result, Exception):
                 logger.error("Dimension %s failed: %s", dim_name, result)
                 dim_results[dim_name] = DimensionResult(
@@ -171,18 +173,22 @@ class ReviewEngine:
                     response_model=output_model,
                 )
 
-            # Parse result
+            # Parse result defensively — LLM may return malformed data
             if isinstance(result, dict):
                 if dim_spec.name in ("risk_analysis", "term_fairness"):
-                    risks = result.get("risks", [])
-                    for r in risks:
+                    for r in result.get("risks", []):
                         if isinstance(r, dict):
-                            all_risks.append(RiskFinding(**r))
+                            try:
+                                all_risks.append(RiskFinding(**r))
+                            except ValidationError as e:
+                                logger.warning("Skipping malformed risk finding: %s", e)
                 elif dim_spec.name == "compliance":
-                    comp_results = result.get("results", [])
-                    for cr in comp_results:
+                    for cr in result.get("results", []):
                         if isinstance(cr, dict):
-                            all_compliance.append(ComplianceResult(**cr))
+                            try:
+                                all_compliance.append(ComplianceResult(**cr))
+                            except ValidationError as e:
+                                logger.warning("Skipping malformed compliance result: %s", e)
 
             if on_progress:
                 await _call_progress(on_progress, ProgressEvent(
@@ -234,10 +240,12 @@ class ReviewEngine:
 
         dim_result = DimensionResult(dimension=dim_spec.name)
         if isinstance(result, dict):
-            missing = result.get("missing_clauses", [])
-            for m in missing:
+            for m in result.get("missing_clauses", []):
                 if isinstance(m, dict):
-                    dim_result.missing_clauses.append(MissingClause(**m))
+                    try:
+                        dim_result.missing_clauses.append(MissingClause(**m))
+                    except ValidationError as e:
+                        logger.warning("Skipping malformed missing clause: %s", e)
 
         if on_progress:
             await _call_progress(on_progress, ProgressEvent(
@@ -300,7 +308,10 @@ class ReviewEngine:
 
 
 async def _call_progress(callback: Callable, event: ProgressEvent) -> None:
-    """Call a progress callback, handling both sync and async."""
-    result = callback(event)
-    if asyncio.iscoroutine(result):
-        await result
+    """Call a progress callback, handling both sync and async. Never raises."""
+    try:
+        result = callback(event)
+        if asyncio.iscoroutine(result):
+            await result
+    except Exception as e:
+        logger.warning("Progress callback error (non-fatal): %s", e)

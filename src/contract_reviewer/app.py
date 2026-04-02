@@ -2,17 +2,17 @@
 
 import asyncio
 import json
+import logging
 import tempfile
 from pathlib import Path
 
 import yaml
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from contract_reviewer.chunking.contract_parser import ContractParser
+from contract_reviewer.chunking.contract_parser import ContractParser, ParseError
 from contract_reviewer.chunking.splitter import ContractSplitter
-from contract_reviewer.llm.client import LLMClient
+from contract_reviewer.llm.client import LLMClient, LLMError
 from contract_reviewer.models.config import Settings
 from contract_reviewer.models.progress import ProgressEvent
 from contract_reviewer.models.review import ReviewReport
@@ -20,8 +20,9 @@ from contract_reviewer.rag.embedder import Embedder
 from contract_reviewer.rag.prompt_builder import PromptBuilder
 from contract_reviewer.rag.retriever import Retriever
 from contract_reviewer.rag.vectorstore import VectorStore
-from contract_reviewer.review.aggregator import format_report_markdown
 from contract_reviewer.review.engine import ReviewEngine
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Contract Reviewer API",
@@ -60,8 +61,8 @@ async def startup() -> None:
             vectorstore = VectorStore(_settings.vectorstore_path)
             if vectorstore.count > 0:
                 retriever = Retriever(embedder, vectorstore, _settings.retrieval_top_k)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("RAG initialization failed (non-fatal): %s", e)
 
     _engine = ReviewEngine(
         llm=llm,
@@ -70,6 +71,13 @@ async def startup() -> None:
         settings=_settings,
         rules=rules,
     )
+
+
+def _save_upload(file_content: bytes, suffix: str) -> str:
+    """Save uploaded content to a temp file and return its path."""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(file_content)
+        return tmp.name
 
 
 @app.post("/api/review", response_model=ReviewReport)
@@ -81,12 +89,9 @@ async def review_contract(
     if _engine is None or _settings is None:
         raise HTTPException(503, "Service not initialized")
 
-    # Save uploaded file
     suffix = Path(file.filename or "contract.txt").suffix
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        content = await file.read()
-        tmp.write(content)
-        tmp_path = tmp.name
+    content = await file.read()
+    tmp_path = _save_upload(content, suffix)
 
     try:
         parser = ContractParser()
@@ -96,6 +101,10 @@ async def review_contract(
 
         report = await _engine.review(contract, dimensions=dimensions)
         return report
+    except ParseError as e:
+        raise HTTPException(422, str(e))
+    except LLMError as e:
+        raise HTTPException(502, f"LLM service error: {e}")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -110,12 +119,11 @@ async def review_contract_stream(
         raise HTTPException(503, "Service not initialized")
 
     suffix = Path(file.filename or "contract.txt").suffix
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        content = await file.read()
-        tmp.write(content)
-        tmp_path = tmp.name
+    content = await file.read()
+    tmp_path = _save_upload(content, suffix)
 
     async def generate():
+        review_task = None
         try:
             parser = ContractParser()
             contract = parser.parse(tmp_path)
@@ -144,6 +152,14 @@ async def review_contract_stream(
                     }
                 except asyncio.TimeoutError:
                     if review_task.done():
+                        # Drain any remaining events in the queue before exiting
+                        while not progress_queue.empty():
+                            event = progress_queue.get_nowait()
+                            if event is not None:
+                                yield {
+                                    "event": event.status,
+                                    "data": json.dumps(event.model_dump(), ensure_ascii=False),
+                                }
                         break
 
             report = await review_task
@@ -151,7 +167,15 @@ async def review_contract_stream(
                 "event": "report",
                 "data": report.model_dump_json(ensure_ascii=False),
             }
+        except Exception as e:
+            logger.error("Streaming review failed: %s", e)
+            yield {
+                "event": "error",
+                "data": json.dumps({"error": str(e)}, ensure_ascii=False),
+            }
         finally:
+            if review_task and not review_task.done():
+                review_task.cancel()
             Path(tmp_path).unlink(missing_ok=True)
 
     return EventSourceResponse(generate())

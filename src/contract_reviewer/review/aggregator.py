@@ -1,10 +1,15 @@
 """Aggregate and deduplicate review results."""
 
+from difflib import SequenceMatcher
+
 from contract_reviewer.models.review import DimensionResult, ReviewReport, RiskFinding
 
 
-def deduplicate_risks(risks: list[RiskFinding], threshold: float = 0.8) -> list[RiskFinding]:
-    """Remove duplicate risk findings based on clause text similarity."""
+def deduplicate_risks(risks: list[RiskFinding], threshold: float = 0.85) -> list[RiskFinding]:
+    """Remove duplicate risk findings based on clause text similarity.
+
+    Uses SequenceMatcher for proper string similarity instead of character set overlap.
+    """
     if not risks:
         return []
 
@@ -14,7 +19,7 @@ def deduplicate_risks(risks: list[RiskFinding], threshold: float = 0.8) -> list[
     for risk in risks:
         is_dup = False
         for seen in seen_texts:
-            if _text_overlap(risk.clause_text, seen) > threshold:
+            if _text_similarity(risk.clause_text, seen) > threshold:
                 is_dup = True
                 break
         if not is_dup:
@@ -24,18 +29,15 @@ def deduplicate_risks(risks: list[RiskFinding], threshold: float = 0.8) -> list[
     return unique
 
 
-def _text_overlap(a: str, b: str) -> float:
-    """Simple character-level overlap ratio."""
+def _text_similarity(a: str, b: str) -> float:
+    """Compute string similarity using SequenceMatcher (order-aware)."""
     if not a or not b:
         return 0.0
+    # Exact substring containment is always a duplicate
     shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
     if shorter in longer:
         return 1.0
-    # Use character set overlap as a quick heuristic
-    set_a, set_b = set(a), set(b)
-    intersection = len(set_a & set_b)
-    union = len(set_a | set_b)
-    return intersection / union if union > 0 else 0.0
+    return SequenceMatcher(None, a, b).ratio()
 
 
 def format_report_markdown(report: ReviewReport) -> str:

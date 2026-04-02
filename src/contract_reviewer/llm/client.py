@@ -2,14 +2,24 @@
 
 import hashlib
 import json
+import logging
 from typing import Any, AsyncIterator
 
 import litellm
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from contract_reviewer.llm.cache import ResponseCache
 from contract_reviewer.llm.token_budget import TokenBudget
 from contract_reviewer.models.config import Settings
+
+logger = logging.getLogger(__name__)
+
+# Default timeout for LLM API calls (seconds)
+DEFAULT_TIMEOUT = 120
+
+
+class LLMError(Exception):
+    """Raised when an LLM call fails after exhausting retries."""
 
 
 class LLMClient:
@@ -36,6 +46,7 @@ class LLMClient:
         """Send a completion request and return the response.
 
         If response_model is provided, uses tool_use to get structured output.
+        Raises LLMError on unrecoverable failures.
         """
         messages = [
             {"role": "system", "content": system_prompt},
@@ -49,14 +60,12 @@ class LLMClient:
             if cached is not None:
                 return cached
 
-        # Check token budget
-        await self.token_budget.reserve(self.max_output_tokens)
-
         call_kwargs = {
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_output_tokens,
+            "timeout": DEFAULT_TIMEOUT,
             **kwargs,
         }
         if self.api_base:
@@ -68,20 +77,29 @@ class LLMClient:
             call_kwargs["tools"] = [tool_schema]
             call_kwargs["tool_choice"] = {"type": "function", "function": {"name": tool_schema["function"]["name"]}}
 
-        response = await litellm.acompletion(**call_kwargs)
+        # Call LLM with token budget tracking
+        async with self.token_budget.track(self.max_output_tokens) as recorder:
+            try:
+                response = await litellm.acompletion(**call_kwargs)
+            except litellm.RateLimitError as e:
+                raise LLMError(f"Rate limit exceeded: {e}") from e
+            except litellm.APIConnectionError as e:
+                raise LLMError(f"API connection failed: {e}") from e
+            except litellm.Timeout as e:
+                raise LLMError(f"API call timed out after {DEFAULT_TIMEOUT}s: {e}") from e
+            except litellm.APIError as e:
+                raise LLMError(f"API error: {e}") from e
+            except Exception as e:
+                raise LLMError(f"Unexpected LLM error: {e}") from e
 
-        # Record token usage
-        usage = response.usage
-        if usage:
-            await self.token_budget.record_usage(
-                usage.prompt_tokens or 0, usage.completion_tokens or 0
-            )
+            # Record token usage
+            usage = getattr(response, "usage", None)
+            if usage:
+                recorder.prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                recorder.completion_tokens = getattr(usage, "completion_tokens", 0) or 0
 
-        # Extract result
-        if response_model is not None:
-            result = self._extract_tool_result(response)
-        else:
-            result = response.choices[0].message.content or ""
+        # Extract result safely
+        result = self._extract_result(response, response_model)
 
         # Store in cache
         if self.cache:
@@ -95,13 +113,11 @@ class LLMClient:
         user_prompt: str,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Stream completion tokens."""
+        """Stream completion tokens. Raises LLMError on failure."""
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
-
-        await self.token_budget.reserve(self.max_output_tokens)
 
         call_kwargs = {
             "model": self.model,
@@ -109,22 +125,52 @@ class LLMClient:
             "temperature": self.temperature,
             "max_tokens": self.max_output_tokens,
             "stream": True,
+            "timeout": DEFAULT_TIMEOUT,
             **kwargs,
         }
         if self.api_base:
             call_kwargs["api_base"] = self.api_base
 
-        response = await litellm.acompletion(**call_kwargs)
-        async for chunk in response:
-            delta = chunk.choices[0].delta
-            if delta and delta.content:
-                yield delta.content
+        async with self.token_budget.track(self.max_output_tokens) as recorder:
+            try:
+                response = await litellm.acompletion(**call_kwargs)
+            except (litellm.RateLimitError, litellm.APIConnectionError,
+                    litellm.Timeout, litellm.APIError) as e:
+                raise LLMError(f"Streaming LLM call failed: {e}") from e
+            except Exception as e:
+                raise LLMError(f"Unexpected streaming error: {e}") from e
+
+            async for chunk in response:
+                choices = getattr(chunk, "choices", None)
+                if not choices:
+                    continue
+                delta = getattr(choices[0], "delta", None)
+                if delta and getattr(delta, "content", None):
+                    yield delta.content
+
+                # Try to capture usage from final chunk
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    recorder.prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+                    recorder.completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+    def _extract_result(self, response: Any, response_model: type[BaseModel] | None) -> str | dict:
+        """Safely extract result from an LLM response."""
+        choices = getattr(response, "choices", None)
+        if not choices:
+            logger.warning("LLM response has no choices")
+            return {"raw_response": ""} if response_model else ""
+
+        message = choices[0].message
+
+        if response_model is not None:
+            return self._extract_tool_result(message)
+        return getattr(message, "content", "") or ""
 
     @staticmethod
     def _pydantic_to_tool(model: type[BaseModel]) -> dict:
         """Convert a Pydantic model to an OpenAI-compatible tool schema."""
         schema = model.model_json_schema()
-        # Remove $defs and title from top level for cleaner tool schema
         schema.pop("title", None)
         return {
             "type": "function",
@@ -136,23 +182,33 @@ class LLMClient:
         }
 
     @staticmethod
-    def _extract_tool_result(response: Any) -> dict:
-        """Extract structured result from a tool_use response."""
-        message = response.choices[0].message
-        if message.tool_calls:
-            args = message.tool_calls[0].function.arguments
-            return json.loads(args) if isinstance(args, str) else args
+    def _extract_tool_result(message: Any) -> dict:
+        """Extract structured result from a tool_use response with defensive checks."""
+        # Try tool_calls first
+        tool_calls = getattr(message, "tool_calls", None)
+        if tool_calls and len(tool_calls) > 0:
+            func = getattr(tool_calls[0], "function", None)
+            if func:
+                args = getattr(func, "arguments", None)
+                if args:
+                    try:
+                        return json.loads(args) if isinstance(args, str) else args
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse tool_call arguments: %s", args[:200])
+
         # Fallback: try to parse content as JSON
-        content = message.content or ""
+        content = getattr(message, "content", "") or ""
         try:
             return json.loads(content)
         except json.JSONDecodeError:
+            logger.warning("LLM returned non-JSON content, wrapping as raw_response")
             return {"raw_response": content}
 
-    @staticmethod
-    def _cache_key(messages: list[dict], response_model: type | None) -> str:
-        """Generate a cache key from messages and model type."""
+    def _cache_key(self, messages: list[dict], response_model: type | None) -> str:
+        """Generate a cache key from messages, model, and response type."""
         data = json.dumps(messages, sort_keys=True, ensure_ascii=False)
+        # Include model identifier so switching models invalidates cache
+        data += f"|model={self.model}|temp={self.temperature}"
         if response_model:
-            data += response_model.__name__
+            data += f"|schema={response_model.__name__}"
         return hashlib.sha256(data.encode()).hexdigest()
