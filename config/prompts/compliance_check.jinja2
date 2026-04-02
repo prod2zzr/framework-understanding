@@ -1,0 +1,27 @@
+请检查以下合同文本是否符合以下合规规则。
+
+合规规则清单：
+{{ rules }}
+
+对每条规则，判定合同是否：
+- pass: 完全符合
+- fail: 违反该规则
+- warning: 部分符合或存在歧义
+- not_applicable: 该规则不适用于本合同
+
+对每条规则，请提供：
+- rule_id: 规则编号
+- rule_description: 规则描述
+- status: 判定结果 (pass/fail/warning/not_applicable)
+- finding: 具体发现说明
+- clause_text: 相关合同原文（如适用）
+{% if legal_context %}
+
+相关法律依据：
+{{ legal_context }}
+{% endif %}
+
+---
+合同文本：
+{{ contract_text }}
+---

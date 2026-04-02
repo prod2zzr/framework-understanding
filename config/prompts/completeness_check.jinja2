@@ -1,0 +1,30 @@
+请检查以下合同是否包含所有必要条款。一份完整的合同通常应包含：
+
+1. **合同主体** (parties): 各方名称、地址、联系方式、法定代表人
+2. **合同标的** (subject_matter): 服务/商品内容的明确描述
+3. **价款及支付** (price_and_payment): 金额、支付方式、支付时间
+4. **履行条款** (performance): 履行期限、地点、方式
+5. **违约责任** (breach_liability): 违约情形、违约金、赔偿方式
+6. **争议解决** (dispute_resolution): 仲裁或诉讼管辖约定
+7. **不可抗力** (force_majeure): 不可抗力定义及后果
+8. **保密条款** (confidentiality): 保密范围、期限
+9. **知识产权** (intellectual_property): IP归属约定
+10. **适用法律** (governing_law): 适用法律
+11. **通知条款** (notice): 通知方式及送达
+12. **合同变更与解除** (amendment_termination): 变更和终止条件
+
+对每项缺失的条款，请提供：
+- clause_type: 缺失条款类型
+- importance: 重要程度 (high/medium/low)
+- description: 该条款的作用说明
+- suggestion: 建议补充的内容概要
+{% if legal_context %}
+
+相关法律依据：
+{{ legal_context }}
+{% endif %}
+
+---
+合同文本：
+{{ contract_text }}
+---
