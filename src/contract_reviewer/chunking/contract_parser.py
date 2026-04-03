@@ -29,8 +29,73 @@ class ContractParser:
     # Minimum extractable text length to consider a PDF valid
     MIN_TEXT_LENGTH = 50
 
+    def __init__(self, ocr_engine: "OCREngine | None" = None):
+        """Initialize parser with optional OCR engine for scanned PDFs.
+
+        Args:
+            ocr_engine: An OCR engine instance. If provided, scanned PDFs
+                will be processed via OCR instead of raising an error.
+        """
+        self.ocr_engine = ocr_engine
+
+    async def parse_async(self, file_path: str) -> Contract:
+        """Parse a contract file (async version, required for OCR fallback)."""
+        path = Path(file_path)
+        if not path.exists():
+            raise ParseError(f"File not found: {file_path}")
+
+        text = self._extract_text(path)
+        metadata: dict = {}
+
+        # If text extraction failed and OCR is available, try OCR
+        if len(text.strip()) < self.MIN_TEXT_LENGTH and path.suffix.lower() == ".pdf":
+            if self.ocr_engine:
+                logger.info("Text extraction insufficient, attempting OCR: %s", path.name)
+                ocr_result = await self.ocr_engine.recognize(str(path))
+                text = ocr_result.full_text
+                metadata = {
+                    "ocr_used": True,
+                    "ocr_provider": ocr_result.provider,
+                    "ocr_device": ocr_result.device,
+                    "ocr_confidence": ocr_result.average_confidence,
+                    "ocr_elapsed_ms": ocr_result.total_elapsed_ms,
+                }
+                logger.info(
+                    "OCR complete: provider=%s, confidence=%.2f, elapsed=%dms",
+                    ocr_result.provider,
+                    ocr_result.average_confidence,
+                    ocr_result.total_elapsed_ms,
+                )
+
+                # Release OCR model memory (staged loading)
+                if hasattr(self.ocr_engine, "unload"):
+                    self.ocr_engine.unload()
+            else:
+                raise ParseError(
+                    f"Extracted text too short ({len(text.strip())} chars). "
+                    f"The file appears to be a scanned PDF. "
+                    f"Enable OCR with: --ocr flag or CR_OCR_ENABLED=true. "
+                    f"Install OCR dependencies: pip install -e '.[ocr]'"
+                )
+
+        if len(text.strip()) < self.MIN_TEXT_LENGTH:
+            raise ParseError(
+                f"Text extraction failed ({len(text.strip())} chars after OCR). "
+                f"The document may be unreadable or corrupted."
+            )
+
+        sections = self._split_sections(text)
+
+        return Contract(
+            name=path.stem,
+            source_path=str(path.absolute()),
+            full_text=text,
+            sections=sections,
+            metadata=metadata,
+        )
+
     def parse(self, file_path: str) -> Contract:
-        """Parse a contract file into a Contract object.
+        """Parse a contract file (sync version, no OCR support).
 
         Raises ParseError if the file cannot be read or contains no extractable text.
         """
@@ -40,10 +105,15 @@ class ContractParser:
 
         text = self._extract_text(path)
         if len(text.strip()) < self.MIN_TEXT_LENGTH:
+            if self.ocr_engine:
+                raise ParseError(
+                    f"Scanned PDF detected. Use parse_async() for OCR support, "
+                    f"or run with: contract-review {file_path} --ocr"
+                )
             raise ParseError(
                 f"Extracted text too short ({len(text.strip())} chars). "
                 f"The file may be a scanned PDF or image-only document. "
-                f"Please provide a text-based document or OCR the file first."
+                f"Enable OCR with: --ocr flag or CR_OCR_ENABLED=true"
             )
 
         sections = self._split_sections(text)

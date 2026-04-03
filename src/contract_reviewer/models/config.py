@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 5
     use_reranker: bool = False
     reranker_model: str | None = None
+    rag_mode: str = "precomputed"  # "precomputed" | "runtime_embed" | "disabled"
+    precomputed_queries_path: str = "data/precomputed_queries.json"
 
     # Chunking
     chunk_size_tokens: int = 512
@@ -38,6 +40,14 @@ class Settings(BaseSettings):
         "completeness",
         "term_fairness",
     ]
+
+    # OCR (edge deployment)
+    ocr_enabled: bool = False
+    ocr_provider: str = "paddleocr"  # "paddleocr" | "glm_ocr"
+    ocr_languages: list[str] = ["ch", "en"]
+    ocr_use_gpu: bool = False
+    ocr_dpi: int = 300
+    ocr_result_endpoint: str | None = None  # Layer 3 aggregation endpoint
 
     # Paths
     prompts_dir: str = "config/prompts"

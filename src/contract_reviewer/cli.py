@@ -17,8 +17,10 @@ from contract_reviewer.chunking.splitter import ContractSplitter
 from contract_reviewer.llm.client import LLMClient
 from contract_reviewer.models.config import Settings
 from contract_reviewer.models.progress import ProgressEvent
+from contract_reviewer.ocr.factory import create_ocr_engine
 from contract_reviewer.rag.embedder import Embedder
 from contract_reviewer.rag.ingestor import KnowledgeIngestor
+from contract_reviewer.rag.precomputed_queries import PrecomputedQueries
 from contract_reviewer.rag.prompt_builder import PromptBuilder
 from contract_reviewer.rag.retriever import Retriever
 from contract_reviewer.rag.vectorstore import VectorStore
@@ -51,16 +53,28 @@ def _build_engine(settings: Settings, rules: list[dict]) -> tuple[ReviewEngine, 
         max_context_tokens=settings.llm_max_output_tokens,
     )
 
-    # Try to set up RAG (optional)
+    # Set up RAG (optional, supports precomputed mode for zero-model retrieval)
     retriever = None
     vectorstore_path = Path(settings.vectorstore_path)
-    if vectorstore_path.exists() and any(vectorstore_path.iterdir()):
+    if settings.rag_mode != "disabled" and vectorstore_path.exists() and any(vectorstore_path.iterdir()):
         try:
-            embedder = Embedder(settings)
             vectorstore = VectorStore(settings.vectorstore_path)
             if vectorstore.count > 0:
-                retriever = Retriever(embedder, vectorstore, settings.retrieval_top_k)
-                console.print("[dim]RAG knowledge base loaded[/dim]")
+                # Precomputed mode: no embedding model needed at runtime
+                precomputed = PrecomputedQueries(settings.precomputed_queries_path)
+                embedder = None
+                if settings.rag_mode == "runtime_embed":
+                    embedder = Embedder(settings)
+
+                retriever = Retriever(
+                    vectorstore=vectorstore,
+                    top_k=settings.retrieval_top_k,
+                    embedder=embedder,
+                    precomputed=precomputed,
+                    mode=settings.rag_mode,
+                )
+                mode_label = "precomputed" if precomputed.is_available else "runtime_embed"
+                console.print(f"[dim]RAG loaded (mode={mode_label}, vectors={vectorstore.count})[/dim]")
         except Exception as e:
             console.print(f"[yellow]RAG not available: {e}[/yellow]")
 
@@ -82,22 +96,37 @@ def review(
     fmt: Annotated[str, typer.Option("--format", "-f", help="输出格式")] = "markdown",
     dimensions: Annotated[Optional[list[str]], typer.Option("--dim", "-d", help="审查维度")] = None,
     model: Annotated[Optional[str], typer.Option("--model", "-m", help="LLM 模型")] = None,
+    ocr: Annotated[bool, typer.Option("--ocr/--no-ocr", help="启用 OCR（扫描件识别）")] = False,
 ) -> None:
     """审查一份合同文件。"""
     settings = Settings()
     if model:
         settings.llm_model = model
+    if ocr:
+        settings.ocr_enabled = True
 
     rules_path = rules or settings.rules_path
     rule_list = _load_rules(rules_path)
 
-    # Parse contract
-    parser = ContractParser()
+    # Set up OCR engine if enabled
+    ocr_engine = create_ocr_engine(settings)
+    if ocr_engine:
+        console.print(f"[dim]OCR enabled: {settings.ocr_provider}[/dim]")
+
+    # Parse contract (async if OCR is available)
+    parser = ContractParser(ocr_engine=ocr_engine)
     with console.status("解析合同文档..."):
-        contract = parser.parse(contract_path)
+        if ocr_engine:
+            contract = asyncio.run(parser.parse_async(contract_path))
+        else:
+            contract = parser.parse(contract_path)
         splitter = ContractSplitter(settings.chunk_size_tokens, settings.chunk_overlap_tokens)
         chunks = splitter.split(contract)
-    console.print(f"合同已解析: {len(contract.sections)} 个章节, {len(chunks)} 个分块")
+
+    ocr_label = ""
+    if contract.metadata.get("ocr_used"):
+        ocr_label = f" (OCR: {contract.metadata.get('ocr_provider')}, confidence={contract.metadata.get('ocr_confidence', 0):.2f})"
+    console.print(f"合同已解析: {len(contract.sections)} 个章节, {len(chunks)} 个分块{ocr_label}")
 
     # Build engine
     engine, _ = _build_engine(settings, rule_list)
