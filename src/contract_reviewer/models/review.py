@@ -29,6 +29,10 @@ class RiskFinding(BaseModel):
     explanation: str = Field(description="风险分析")
     suggestion: str = Field(description="修改建议")
 
+    # Evidence verification (populated post-analysis, not by LLM)
+    evidence_verified: bool = Field(default=False, description="原文引用是否经过验证")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="置信度")
+
 
 class KeyTerm(BaseModel):
     """An extracted key term from the contract."""
@@ -87,6 +91,8 @@ class ReviewReport(BaseModel):
     overall_risk_score: int = Field(ge=0, le=100, description="0-100, 越高风险越大")
     summary: str = ""
     dimensions: dict[str, DimensionResult] = {}
+    verification_summary: dict = Field(default_factory=dict, description="验证摘要")
+    audit_summary: dict = Field(default_factory=dict, description="审计摘要")
 
     def risk_score_label(self) -> str:
         if self.overall_risk_score >= 70:

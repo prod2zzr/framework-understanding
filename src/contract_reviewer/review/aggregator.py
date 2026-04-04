@@ -3,6 +3,7 @@
 from difflib import SequenceMatcher
 
 from contract_reviewer.models.review import DimensionResult, ReviewReport, RiskFinding
+from contract_reviewer.review.learnings import extract_candidate_rules
 
 
 def deduplicate_risks(risks: list[RiskFinding], threshold: float = 0.85) -> list[RiskFinding]:
@@ -109,6 +110,31 @@ def format_report_markdown(report: ReviewReport) -> str:
                 lines.append(f"- **{li.issue_type}**: {li.text}")
                 lines.append(f"  {li.explanation} → {li.suggestion}")
             lines.append("")
+
+    # Candidate new rules (institutional memory)
+    if hasattr(report, '_candidate_rules') and report._candidate_rules:  # type: ignore[attr-defined]
+        lines.append("## 候选新规则\n")
+        lines.append("> 以下风险发现不属于已有合规规则，建议法务评估后纳入规则库。\n")
+        for cr in report._candidate_rules:  # type: ignore[attr-defined]
+            lines.append(f"- **{cr['id']}** [{cr['severity'].upper()}] {cr['description']}")
+            if cr.get("evidence_example"):
+                lines.append(f"  > 示例: {cr['evidence_example'][:100]}")
+        lines.append("")
+
+    # Verification summary
+    vs = report.verification_summary
+    if vs:
+        lines.append("## 验证摘要\n")
+        lines.append(f"- 证据已验证: {vs.get('evidence_verified', 0)}")
+        lines.append(f"- 证据未验证: {vs.get('evidence_unverified', 0)}")
+        lines.append(f"- 证据缺失: {vs.get('evidence_missing', 0)}")
+        if vs.get("cross_dimension_boosts"):
+            lines.append(f"- 跨维度提升: {vs['cross_dimension_boosts']}")
+        if vs.get("contradictions"):
+            lines.append("- 矛盾:")
+            for c in vs["contradictions"]:
+                lines.append(f"  - {c}")
+        lines.append("")
 
     return "\n".join(lines)
 

@@ -1,11 +1,14 @@
 """Assemble prompts from templates, contract chunks, and RAG context."""
 
+import logging
 from pathlib import Path
 
 import tiktoken
 from jinja2 import Environment, FileSystemLoader
 
 from contract_reviewer.rag.retriever import RetrievedContext
+
+logger = logging.getLogger(__name__)
 
 
 class PromptBuilder:
@@ -52,12 +55,25 @@ class PromptBuilder:
         if rules:
             rules_text = self._format_rules(rules)
 
-        return template.render(
+        rendered = template.render(
             contract_text=contract_text,
             legal_context=context_text,
             rules=rules_text,
             **extra_vars,
         )
+
+        # Pre-flight check: warn if rendered prompt exceeds token budget
+        rendered_tokens = len(self._enc.encode(rendered))
+        if rendered_tokens > self.max_context_tokens:
+            logger.warning(
+                "Prompt exceeds token budget: %d > %d tokens (template=%s). "
+                "Legal context may need trimming.",
+                rendered_tokens,
+                self.max_context_tokens,
+                template_name,
+            )
+
+        return rendered
 
     def _fit_context(
         self,

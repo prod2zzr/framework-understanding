@@ -24,7 +24,12 @@ from contract_reviewer.models.review import (
 )
 from contract_reviewer.rag.prompt_builder import PromptBuilder
 from contract_reviewer.rag.retriever import Retriever
+from contract_reviewer.plugins.registry import get_all_plugins
+from contract_reviewer.review.audit import AuditTrail
 from contract_reviewer.review.dimensions import DIMENSIONS, DimensionSpec
+from contract_reviewer.review.hooks import call_hooks
+from contract_reviewer.review.learnings import extract_candidate_rules
+from contract_reviewer.review.verifier import FindingVerifier
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +70,14 @@ class ReviewEngine:
         prompt_builder: PromptBuilder,
         settings: Settings,
         rules: list[dict] | None = None,
+        hooks: list | None = None,
     ):
         self.llm = llm
         self.retriever = retriever
         self.prompt_builder = prompt_builder
         self.settings = settings
         self.rules = rules or []
+        self.hooks = hooks or []
         self._semaphore = asyncio.Semaphore(settings.llm_max_concurrent)
 
     async def review(
@@ -82,6 +89,13 @@ class ReviewEngine:
         """Run all (or selected) review dimensions concurrently."""
         active_dims = dimensions or self.settings.review_dimensions
         system_prompt = self.prompt_builder.build_system_prompt()
+
+        # Audit trail
+        self._audit = AuditTrail(contract.name)
+        self._audit.log("review_start", detail={"dimensions": active_dims})
+
+        # Lifecycle hooks
+        await call_hooks(self.hooks, "on_review_start", contract)
 
         # Run dimensions concurrently — track which dims actually run
         run_dims: list[str] = []
@@ -111,14 +125,45 @@ class ReviewEngine:
             else:
                 dim_results[dim_name] = result
 
+        # Independent verification stage
+        verifier = FindingVerifier()
+        verification_summary = verifier.verify_all(dim_results, contract.full_text)
+        self._audit.log("verification_complete", detail=verification_summary)
+
         report = ReviewReport(
             contract_name=contract.name,
             dimensions=dim_results,
             overall_risk_score=self._compute_risk_score(dim_results),
+            verification_summary=verification_summary,
+            audit_summary=self._audit.summary(),
         )
+
+        # Extract candidate rules (institutional memory)
+        all_risks = [
+            r for dr in dim_results.values() if dr.success for r in dr.risks
+        ]
+        candidate_rules = extract_candidate_rules(all_risks, self.rules)
+        if candidate_rules:
+            report._candidate_rules = candidate_rules  # type: ignore[attr-defined]
+            self._audit.log("candidate_rules", detail={
+                "count": len(candidate_rules),
+                "ids": [c["id"] for c in candidate_rules],
+            })
 
         # Generate summary
         report.summary = await self._generate_summary(report, system_prompt)
+
+        self._audit.log("review_complete", detail={
+            "overall_risk_score": report.overall_risk_score,
+            "dimensions_succeeded": [d for d, r in dim_results.items() if r.success],
+            "dimensions_failed": [d for d, r in dim_results.items() if not r.success],
+        })
+
+        # Lifecycle hooks
+        await call_hooks(self.hooks, "on_report_ready", report)
+
+        # Expose audit trail for CLI/API to save
+        report._audit_trail = self._audit  # type: ignore[attr-defined]
 
         return report
 
@@ -130,6 +175,7 @@ class ReviewEngine:
         on_progress: Callable[[ProgressEvent], Any] | None,
     ) -> DimensionResult:
         """Run a single review dimension across relevant contract chunks."""
+        self._audit.log("dimension_start", dimension=dim_spec.name)
         if on_progress:
             await _call_progress(on_progress, ProgressEvent(
                 dimension=dim_spec.name, status="started",
@@ -189,6 +235,17 @@ class ReviewEngine:
                                 all_compliance.append(ComplianceResult(**cr))
                             except ValidationError as e:
                                 logger.warning("Skipping malformed compliance result: %s", e)
+
+            # Run applicable plugins on this chunk
+            for plugin in get_all_plugins().values():
+                try:
+                    if plugin.applicable_to(chunk):
+                        plugin_findings = await plugin.review_chunk(
+                            chunk, legal_context or [], self.llm
+                        )
+                        all_risks.extend(plugin_findings)
+                except Exception as e:
+                    logger.warning("Plugin %s failed on chunk %d: %s", plugin.name, chunk.chunk_index, e)
 
             if on_progress:
                 await _call_progress(on_progress, ProgressEvent(

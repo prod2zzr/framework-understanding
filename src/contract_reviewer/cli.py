@@ -27,6 +27,7 @@ from contract_reviewer.rag.vectorstore import VectorStore
 from contract_reviewer.review.aggregator import format_report_markdown
 from contract_reviewer.review.batch import batch_review
 from contract_reviewer.review.engine import ReviewEngine
+from contract_reviewer.review import rule_history
 
 app = typer.Typer(
     name="contract-review",
@@ -103,6 +104,7 @@ def review(
     dimensions: Annotated[Optional[list[str]], typer.Option("--dim", "-d", help="审查维度")] = None,
     model: Annotated[Optional[str], typer.Option("--model", "-m", help="LLM 模型")] = None,
     ocr: Annotated[bool, typer.Option("--ocr/--no-ocr", help="启用 OCR（扫描件识别）")] = False,
+    audit_log: Annotated[Optional[str], typer.Option("--audit-log", help="审计日志输出路径")] = None,
 ) -> None:
     """审查一份合同文件。"""
     settings = Settings()
@@ -113,6 +115,10 @@ def review(
 
     rules_path = rules or settings.rules_path
     rule_list = _load_rules(rules_path)
+
+    # Track rule file changes
+    if rule_history.check_and_record(rules_path):
+        console.print("[dim]规则文件已变更，版本已记录[/dim]")
 
     # Set up OCR engine if enabled
     ocr_engine = create_ocr_engine(settings)
@@ -165,6 +171,12 @@ def review(
             console.print(Markdown(result))
         else:
             console.print(result)
+
+    # Save audit trail if requested
+    audit_trail = getattr(report, "_audit_trail", None)
+    if audit_trail and audit_log:
+        audit_trail.save(Path(audit_log))
+        console.print(f"[dim]审计日志已保存: {audit_log}[/dim]")
 
     # Summary panel
     console.print(Panel(

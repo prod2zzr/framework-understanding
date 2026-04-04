@@ -1,14 +1,17 @@
 """LLM client wrapping LiteLLM for unified cloud/local model access."""
 
+import asyncio
 import hashlib
 import json
 import logging
+import random
 from typing import Any, AsyncIterator
 
 import litellm
 from pydantic import BaseModel, ValidationError
 
 from contract_reviewer.llm.cache import ResponseCache
+from contract_reviewer.llm.circuit_breaker import CircuitBreaker, CircuitOpenError
 from contract_reviewer.llm.token_budget import TokenBudget
 from contract_reviewer.models.config import Settings
 
@@ -16,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 # Default timeout for LLM API calls (seconds)
 DEFAULT_TIMEOUT = 120
+
+# Exceptions worth retrying (transient failures)
+_RETRYABLE = (litellm.RateLimitError, litellm.APIConnectionError, litellm.Timeout)
 
 
 class LLMError(Exception):
@@ -33,8 +39,67 @@ class LLMClient:
         self.token_budget = TokenBudget(settings.llm_max_total_tokens)
         self.cache = ResponseCache(settings.cache_dir) if settings.cache_enabled else None
 
+        # Resilience
+        self._max_retries = settings.llm_max_retries
+        self._retry_base_delay = settings.llm_retry_base_delay
+        self._breaker = CircuitBreaker(
+            failure_threshold=settings.llm_circuit_breaker_threshold,
+            recovery_timeout=settings.llm_circuit_breaker_recovery,
+            name="llm",
+        )
+
         if settings.llm_api_key:
             litellm.api_key = settings.llm_api_key
+
+    # ------------------------------------------------------------------
+    # Retry helper
+    # ------------------------------------------------------------------
+
+    async def _call_with_retry(
+        self,
+        coro_factory,
+        *,
+        max_retries: int | None = None,
+        base_delay: float | None = None,
+    ):
+        """Execute *coro_factory()* with exponential back-off on transient errors."""
+        retries = max_retries if max_retries is not None else self._max_retries
+        delay = base_delay if base_delay is not None else self._retry_base_delay
+
+        last_error: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                return await self._breaker.call(coro_factory)
+            except CircuitOpenError:
+                raise  # Don't retry when the breaker is open
+            except _RETRYABLE as exc:
+                last_error = exc
+                if attempt < retries:
+                    wait = delay * (2 ** attempt) + random.uniform(0, 0.5)
+                    logger.warning(
+                        "Retry %d/%d after %.1fs: %s",
+                        attempt + 1, retries, wait, exc,
+                    )
+                    await asyncio.sleep(wait)
+            except litellm.APIError as exc:
+                # Only retry 5xx server errors, not 4xx client errors
+                status = getattr(exc, "status_code", None)
+                if status and 500 <= status < 600 and attempt < retries:
+                    last_error = exc
+                    wait = delay * (2 ** attempt) + random.uniform(0, 0.5)
+                    logger.warning(
+                        "Retry %d/%d after %.1fs (server error %s): %s",
+                        attempt + 1, retries, wait, status, exc,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    raise LLMError(f"API error: {exc}") from exc
+
+        raise LLMError(f"Failed after {retries} retries: {last_error}") from last_error
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     async def complete(
         self,
@@ -77,18 +142,16 @@ class LLMClient:
             call_kwargs["tools"] = [tool_schema]
             call_kwargs["tool_choice"] = {"type": "function", "function": {"name": tool_schema["function"]["name"]}}
 
-        # Call LLM with token budget tracking
+        # Call LLM with retry, circuit breaker, and token budget tracking
         async with self.token_budget.track(self.max_output_tokens) as recorder:
             try:
-                response = await litellm.acompletion(**call_kwargs)
-            except litellm.RateLimitError as e:
-                raise LLMError(f"Rate limit exceeded: {e}") from e
-            except litellm.APIConnectionError as e:
-                raise LLMError(f"API connection failed: {e}") from e
-            except litellm.Timeout as e:
-                raise LLMError(f"API call timed out after {DEFAULT_TIMEOUT}s: {e}") from e
-            except litellm.APIError as e:
-                raise LLMError(f"API error: {e}") from e
+                response = await self._call_with_retry(
+                    lambda: litellm.acompletion(**call_kwargs)
+                )
+            except CircuitOpenError as e:
+                raise LLMError(f"Circuit breaker open: {e}") from e
+            except LLMError:
+                raise
             except Exception as e:
                 raise LLMError(f"Unexpected LLM error: {e}") from e
 
@@ -133,10 +196,13 @@ class LLMClient:
 
         async with self.token_budget.track(self.max_output_tokens) as recorder:
             try:
-                response = await litellm.acompletion(**call_kwargs)
-            except (litellm.RateLimitError, litellm.APIConnectionError,
-                    litellm.Timeout, litellm.APIError) as e:
-                raise LLMError(f"Streaming LLM call failed: {e}") from e
+                response = await self._call_with_retry(
+                    lambda: litellm.acompletion(**call_kwargs)
+                )
+            except CircuitOpenError as e:
+                raise LLMError(f"Circuit breaker open: {e}") from e
+            except LLMError:
+                raise
             except Exception as e:
                 raise LLMError(f"Unexpected streaming error: {e}") from e
 
@@ -153,6 +219,10 @@ class LLMClient:
                 if usage:
                     recorder.prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
                     recorder.completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
 
     def _extract_result(self, response: Any, response_model: type[BaseModel] | None) -> str | dict:
         """Safely extract result from an LLM response."""

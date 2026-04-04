@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 import yaml
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from sse_starlette.sse import EventSourceResponse
 
 from contract_reviewer.chunking.contract_parser import ContractParser, ParseError
@@ -20,6 +20,7 @@ from contract_reviewer.rag.embedder import Embedder
 from contract_reviewer.rag.prompt_builder import PromptBuilder
 from contract_reviewer.rag.retriever import Retriever
 from contract_reviewer.rag.vectorstore import VectorStore
+from contract_reviewer.plugins.registry import discover_plugins
 from contract_reviewer.review.engine import ReviewEngine
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ _engine: ReviewEngine | None = None
 async def startup() -> None:
     global _settings, _engine
     _settings = Settings()
+    discover_plugins()
 
     rules_path = Path(_settings.rules_path)
     rules = []
@@ -73,6 +75,14 @@ async def startup() -> None:
     )
 
 
+async def _verify_api_key(request: Request) -> None:
+    """Optional API key authentication. Skipped if CR_API_KEY is not set."""
+    if _settings and _settings.api_key:
+        key = request.headers.get("X-API-Key")
+        if key != _settings.api_key:
+            raise HTTPException(401, "Invalid or missing API key")
+
+
 def _save_upload(file_content: bytes, suffix: str) -> str:
     """Save uploaded content to a temp file and return its path."""
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -80,7 +90,7 @@ def _save_upload(file_content: bytes, suffix: str) -> str:
         return tmp.name
 
 
-@app.post("/api/review", response_model=ReviewReport)
+@app.post("/api/review", response_model=ReviewReport, dependencies=[Depends(_verify_api_key)])
 async def review_contract(
     file: UploadFile = File(...),
     dimensions: list[str] | None = Query(default=None),
@@ -109,7 +119,7 @@ async def review_contract(
         Path(tmp_path).unlink(missing_ok=True)
 
 
-@app.post("/api/review/stream")
+@app.post("/api/review/stream", dependencies=[Depends(_verify_api_key)])
 async def review_contract_stream(
     file: UploadFile = File(...),
     dimensions: list[str] | None = Query(default=None),

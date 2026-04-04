@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.1
     llm_max_output_tokens: int = 4096
 
+    # Resilience
+    llm_max_retries: int = 3
+    llm_retry_base_delay: float = 1.0
+    llm_circuit_breaker_threshold: int = 5
+    llm_circuit_breaker_recovery: int = 30
+
     # Embeddings
     embedding_model: str = "ollama/bge-large-zh"
     embedding_api_base: str = "http://localhost:11434"
@@ -48,6 +54,9 @@ class Settings(BaseSettings):
     ocr_use_gpu: bool = False
     ocr_dpi: int = 300
     ocr_result_endpoint: str | None = None  # Layer 3 aggregation endpoint
+
+    # API Security
+    api_key: str | None = None  # If set, require X-API-Key header
 
     # Paths
     prompts_dir: str = "config/prompts"
