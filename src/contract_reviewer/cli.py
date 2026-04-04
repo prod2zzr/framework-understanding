@@ -60,11 +60,17 @@ def _build_engine(settings: Settings, rules: list[dict]) -> tuple[ReviewEngine, 
         try:
             vectorstore = VectorStore(settings.vectorstore_path)
             if vectorstore.count > 0:
-                # Precomputed mode: no embedding model needed at runtime
                 precomputed = PrecomputedQueries(settings.precomputed_queries_path)
+                # Always try to load embedder for fallback capability;
+                # gracefully degrade if Ollama is not running
                 embedder = None
-                if settings.rag_mode == "runtime_embed":
+                try:
                     embedder = Embedder(settings)
+                except Exception as emb_err:
+                    if settings.rag_mode == "runtime_embed":
+                        console.print(f"[yellow]Embedding model unavailable, falling back to precomputed: {emb_err}[/yellow]")
+                    else:
+                        logger.debug("Embedder not loaded (optional in %s mode): %s", settings.rag_mode, emb_err)
 
                 retriever = Retriever(
                     vectorstore=vectorstore,

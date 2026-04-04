@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 5
     use_reranker: bool = False
     reranker_model: str | None = None
-    rag_mode: str = "precomputed"  # "precomputed" | "runtime_embed" | "disabled"
+    rag_mode: str = "runtime_embed"  # "runtime_embed" | "precomputed" | "disabled"
     precomputed_queries_path: str = "data/precomputed_queries.json"
 
     # Chunking

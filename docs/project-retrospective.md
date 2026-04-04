@@ -11,7 +11,7 @@
 
 问题很具体：**中国企业的合同审查，能不能用 AI 做？** 不是概念验证，是要能跑起来、能落地的东西。这意味着几个硬约束从一开始就存在：
 
-1. **中文法律语境** — 不是翻译英文合同工具，是原生支持《民法典》、中文条款结构（"第一条"、"（一）"）的系统
+1. **中文法律为主，多法域并存** — 核心场景是中国法律（《民法典》合同编、中文条款结构"第一条"/"（一）"），但系统从一开始就留了国际化钩子：条款解析器已支持英文模式（`Article\s+\d+`、`Section\s+\d+`），规则文件有 `description_en` 双语字段，system prompt 会根据合同语言自适应（"请使用与合同相同的语言回复"）。不过，深层基础设施 — 插件（`CivilCodeCompliancePlugin`）、预计算查询模板、Jinja2 提示词主体 — 仍然是中文特化的。真正的多语言支持是第六章的欠账项
 2. **部署灵活性** — 有的客户能用云端 API，有的客户的合同不能出内网
 3. **法务人员可参与** — 规则不能写死在代码里，法务要能改
 
@@ -24,6 +24,16 @@
 ### 做了什么决定
 
 **LLM 抽象层选择 LiteLLM。** 这个决定贯穿全项目。一行 `model="anthropic/claude-sonnet-4-20250514"` 是云端，换成 `model="ollama/qwen2.5:72b"` 就是本地。不需要两套代码，不需要 if-else 判断部署模式。环境变量一改，运维搞定。
+
+为什么不选别的方案？简单对比一下：
+
+| 方案 | 优势 | 代价 |
+|------|------|------|
+| 直连 Ollama SDK | 零额外依赖 | 只覆盖本地模型，云端需要单独接 OpenAI/Anthropic SDK，至少 200 行适配代码 |
+| 直连 OpenAI SDK | 生态最大 | Ollama 虽然兼容 OpenAI 格式，但 Anthropic API 格式不同（tool_use 参数结构、错误类型），需要自建适配层 |
+| 自建抽象层 | 完全可控 | 300-600 行 provider adapter + 异常映射 + 重试逻辑，后续每接一个新 provider 就要维护一套 |
+
+LiteLLM 加了一个依赖（~50MB），但统一了 `acompletion()`/`aembedding()` 异步 API、模型字符串路由（`anthropic/`、`ollama/`、`openai/` 前缀）、异常类型层级（`RateLimitError`、`APIConnectionError`、`Timeout`）、以及 `api_base` 覆盖本地端点。项目实际用到的就是这些 — 没用它的路由/负载均衡、failover 链或内置缓存（缓存是自己写的 `ResponseCache`，因为需要按模型 ID 区分缓存键）。换句话说，LiteLLM 在这个项目里的角色是"provider 适配层"，不是"AI 网关"。
 
 **RAG 而非微调。** 法律知识用向量检索注入（ChromaDB + bge-large-zh），不做模型微调。原因：
 - 法律条文更新频繁（司法解释一年出好几个），微调跟不上
@@ -136,7 +146,7 @@ query text → [Embedding Model] → vector → ChromaDB → results
 
 问题：Embedding 模型（bge-large-zh, ~0.6GB）需要常驻内存。
 
-观察到：合同审查的查询模式是固定的。我们不是在做开放域问答，审查维度就那么几个（风险、合规、完整性、公平性），每个维度关注的法律概念也是已知的。
+观察到：合同审查的高频查询模式是可预测的。四个审查维度（风险、合规、完整性、公平性）覆盖了大部分日常场景，每个维度关注的核心法律概念也是已知的。但这不意味着查询空间是封闭的 — 新的审查维度（如数据合规、ESG 条款）随时可能出现，长尾查询（如"跨境数据传输限制条款"）无法被 16 个预定义模板覆盖。
 
 所以改成：
 
@@ -145,9 +155,17 @@ query text → [Embedding Model] → vector → ChromaDB → results
 [运行时] query text → keyword match → precomputed vector → ChromaDB → results
 ```
 
-16 个预定义的法律概念模板，覆盖四个审查维度。运行时用关键词匹配找到最接近的模板，用它的预计算向量去 ChromaDB 查。**不需要加载 Embedding 模型。** 0.6GB 内存就这样省下来了。
+16 个预定义的法律概念模板，覆盖四个审查维度。运行时用关键词匹配找到最接近的模板，用它的预计算向量去 ChromaDB 查。纯预计算模式下不需要加载 Embedding 模型，0.6GB 内存可以让出来。
 
 `scripts/precompute_queries.py` 在有 Embedding 模型的机器上运行一次，生成的 JSON 文件随 ChromaDB 向量库一起分发到边缘节点。
+
+**但预计算不是银弹。** 回头看，"去掉 Embedding 模型"这个表述过于绝对了。预计算模式适合纯离线、极端内存受限的边缘部署场景（比如 16GB 笔记本同时跑 OCR + LLM 时确实没余量），但作为系统默认行为，保留 bge-large-zh 通过 Ollama 常驻后台是更好的选择。理由有三：
+
+1. **语义检索能力不受模板限制。** 预计算的 keyword 匹配是简单的子字符串 `in` 检查（`precomputed_queries.py:98`），无法捕捉语义近义。"违约赔偿上限"和"惩罚性违约金"在语义上高度相关，keyword 匹配发现不了。
+2. **长尾查询有去处。** 16 个模板覆盖了高频概念，但法务人员提出"数据跨境传输""竞业限制期限"这类新维度时，纯预计算模式的 retrieval 直接返回空。Runtime embedding 能给出合理结果。
+3. **新维度上线零成本。** 添加新审查维度时不需要重新运行 `precompute_queries.py` 并重新分发 JSON 文件。
+
+实际上，`retriever.py:87-102` 已经实现了 fallback 链（precomputed → runtime embedding），只是原来 `cli.py` 在预计算模式下把 embedder 设为 None，fallback 形同虚设。修复后的默认模式是 `runtime_embed`：Ollama 跑着就用实时向量，Ollama 没启动则 gracefully 降级到预计算。
 
 ### 分布式预留
 
