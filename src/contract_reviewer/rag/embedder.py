@@ -1,5 +1,6 @@
 """Embedding abstraction supporting cloud and local models."""
 
+import asyncio
 import logging
 
 import litellm
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 MAX_BATCH_SIZE = 96
 # Timeout for embedding calls (seconds)
 EMBED_TIMEOUT = 60
+
+# Maximum concurrent sub-batch API calls
+_MAX_CONCURRENT_BATCHES = 3
 
 # Transient exceptions worth retrying
 _RETRYABLE = (litellm.APIConnectionError, litellm.Timeout, litellm.RateLimitError)
@@ -30,15 +34,23 @@ class Embedder:
         self.api_base = settings.embedding_api_base
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of texts, automatically splitting into sub-batches."""
-        all_embeddings: list[list[float]] = []
+        """Embed a batch of texts, splitting into concurrent sub-batches."""
+        batches = [
+            texts[i : i + MAX_BATCH_SIZE]
+            for i in range(0, len(texts), MAX_BATCH_SIZE)
+        ]
+        if len(batches) <= 1:
+            # Single batch — skip concurrency overhead
+            return await self._embed_batch(batches[0]) if batches else []
 
-        for i in range(0, len(texts), MAX_BATCH_SIZE):
-            batch = texts[i : i + MAX_BATCH_SIZE]
-            embeddings = await self._embed_batch(batch)
-            all_embeddings.extend(embeddings)
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_BATCHES)
 
-        return all_embeddings
+        async def _guarded(batch: list[str]) -> list[list[float]]:
+            async with sem:
+                return await self._embed_batch(batch)
+
+        results = await asyncio.gather(*[_guarded(b) for b in batches])
+        return [emb for batch_result in results for emb in batch_result]
 
     async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a single batch of texts with exponential backoff retry."""

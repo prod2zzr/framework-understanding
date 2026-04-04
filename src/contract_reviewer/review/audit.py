@@ -11,6 +11,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from contract_reviewer.utils.jsonl import append_jsonl
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,14 +61,8 @@ class AuditTrail:
 
     def save(self, path: Path) -> None:
         """Write audit trail as JSON Lines file."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            for entry in self.entries:
-                line = json.dumps(
-                    {"contract": self.contract_name, **entry.model_dump()},
-                    ensure_ascii=False,
-                )
-                f.write(line + "\n")
+        rows = [{"contract": self.contract_name, **e.model_dump()} for e in self.entries]
+        append_jsonl(path, rows)
         logger.info("Audit trail written to %s (%d entries)", path, len(self.entries))
 
     def to_json(self) -> str:

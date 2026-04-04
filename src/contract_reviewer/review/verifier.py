@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 _MIN_EVIDENCE_LEN = 10
 # Fuzzy match threshold for evidence verification
 _FUZZY_THRESHOLD = 0.75
+# Similarity threshold for cross-dimension clause grouping
+_CROSS_DIM_THRESHOLD = 0.7
 
 
 class FindingVerifier:
@@ -142,7 +144,7 @@ class FindingVerifier:
                 if j in assigned:
                     continue
                 ratio = SequenceMatcher(None, risk_i.clause_text, risk_j.clause_text).ratio()
-                if ratio > 0.7:
+                if ratio > _CROSS_DIM_THRESHOLD:
                     group.append((dim_j, risk_j))
                     assigned.add(j)
             groups.append(group)

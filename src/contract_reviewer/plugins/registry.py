@@ -48,5 +48,5 @@ def discover_plugins() -> None:
                     register_plugin(plugin_cls)
             except Exception as e:
                 logger.warning("Failed to load plugin %s: %s", ep.name, e)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("External plugin discovery unavailable: %s", e)

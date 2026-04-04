@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     cache_dir: str = "./data/cache"
 
     # Review
+    completeness_max_chars: int = 8000  # Max contract chars for completeness check
     review_dimensions: list[str] = [
         "risk_analysis",
         "compliance",

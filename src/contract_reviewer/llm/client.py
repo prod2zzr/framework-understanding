@@ -1,9 +1,9 @@
 """LLM client wrapping LiteLLM for unified cloud/local model access."""
 
 import asyncio
-import hashlib
 import json
 import logging
+import random
 from typing import Any, AsyncIterator
 
 import litellm
@@ -12,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 from contract_reviewer.llm.cache import ResponseCache
 from contract_reviewer.llm.circuit_breaker import CircuitBreaker, CircuitOpenError
 from contract_reviewer.llm.retry import retry_with_backoff
+from contract_reviewer.utils.hashing import content_sha256
 from contract_reviewer.llm.token_budget import TokenBudget
 from contract_reviewer.models.config import Settings
 
@@ -281,4 +282,4 @@ class LLMClient:
         data += f"|model={self.model}|temp={self.temperature}"
         if response_model:
             data += f"|schema={response_model.__name__}"
-        return hashlib.sha256(data.encode()).hexdigest()
+        return content_sha256(data)

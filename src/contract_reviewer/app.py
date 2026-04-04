@@ -178,6 +178,13 @@ async def review_contract_stream(
                 "event": "report",
                 "data": report.model_dump_json(ensure_ascii=False),
             }
+            # Emit audit trail if available
+            audit_trail = getattr(_engine, "_last_audit_trail", None)
+            if audit_trail:
+                yield {
+                    "event": "audit",
+                    "data": audit_trail.to_json(),
+                }
         except Exception as e:
             logger.error("Streaming review failed: %s", e)
             yield {
@@ -194,8 +201,24 @@ async def review_contract_stream(
 
 @app.get("/api/health")
 async def health() -> dict:
+    status = "ok"
+    breaker_state = None
+    token_budget_remaining_pct = None
+
+    if _engine:
+        breaker_state = _engine.llm._breaker.state
+        budget = _engine.llm.token_budget
+        if budget._max > 0:
+            token_budget_remaining_pct = round(
+                (1 - budget._used / budget._max) * 100, 1
+            )
+        if breaker_state in ("OPEN", "PROBING"):
+            status = "degraded"
+
     return {
-        "status": "ok",
+        "status": status,
         "model": _settings.llm_model if _settings else "not initialized",
         "rag_available": _engine is not None and _engine.retriever is not None,
+        "circuit_breaker": breaker_state,
+        "token_budget_remaining_pct": token_budget_remaining_pct,
     }

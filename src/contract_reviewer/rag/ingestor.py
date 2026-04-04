@@ -1,6 +1,5 @@
 """Ingest legal knowledge base into the vector store."""
 
-import hashlib
 import json
 import logging
 import re
@@ -8,6 +7,7 @@ from pathlib import Path
 
 from contract_reviewer.rag.embedder import Embedder, EmbeddingError
 from contract_reviewer.rag.vectorstore import VectorStore
+from contract_reviewer.utils.hashing import content_sha256, file_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +94,7 @@ class KnowledgeIngestor:
                 if len(article_text.strip()) < 10:
                     continue
 
-                chunk_id = hashlib.md5(
-                    f"{document_name}:{article_num}".encode()
-                ).hexdigest()
+                chunk_id = content_sha256(f"{document_name}:{article_num}")[:32]
                 chunks.append({
                     "id": chunk_id,
                     "text": article_text,
@@ -112,9 +110,7 @@ class KnowledgeIngestor:
             for i, para in enumerate(paragraphs):
                 if len(para) < 10:
                     continue
-                chunk_id = hashlib.md5(
-                    f"{document_name}:p{i}".encode()
-                ).hexdigest()
+                chunk_id = content_sha256(f"{document_name}:p{i}")[:32]
                 chunks.append({
                     "id": chunk_id,
                     "text": para,
@@ -129,7 +125,7 @@ class KnowledgeIngestor:
 
     @staticmethod
     def _file_hash(path: Path) -> str:
-        return hashlib.md5(path.read_bytes()).hexdigest()
+        return file_sha256(path)
 
     @staticmethod
     def _load_manifest(path: Path) -> dict:

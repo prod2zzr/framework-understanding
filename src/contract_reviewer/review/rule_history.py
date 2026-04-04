@@ -4,11 +4,13 @@ On each review session, computes a fingerprint of the rules file.
 When the fingerprint changes, appends a record to rule_versions.jsonl.
 """
 
-import hashlib
 import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+
+from contract_reviewer.utils.hashing import file_sha256
+from contract_reviewer.utils.jsonl import append_jsonl
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ def check_and_record(rules_path: str, history_path: str = "data/rule_versions.js
     if not rules_file.exists():
         return False
 
-    current_hash = _file_hash(rules_file)
+    current_hash = file_sha256(rules_file)
     history = Path(history_path)
 
     # Read last recorded hash
@@ -41,24 +43,12 @@ def check_and_record(rules_path: str, history_path: str = "data/rule_versions.js
         return False
 
     # Rules changed — record
-    history.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
+    append_jsonl(history, {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "sha256": current_hash,
         "rules_path": str(rules_file),
         "size_bytes": rules_file.stat().st_size,
-    }
-    with open(history, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    })
 
     logger.info("Rules file changed (hash=%s…), recorded in %s", current_hash[:12], history_path)
     return True
-
-
-def _file_hash(path: Path) -> str:
-    """SHA-256 hash of file contents."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()

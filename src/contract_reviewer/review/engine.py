@@ -290,7 +290,7 @@ class ReviewEngine:
 
         user_prompt = self.prompt_builder.build_review_prompt(
             template_name=dim_spec.prompt_template,
-            contract_text=contract.full_text[:8000],  # Truncate for very long contracts
+            contract_text=contract.full_text[:self.settings.completeness_max_chars],
             legal_context=legal_context,
         )
 
