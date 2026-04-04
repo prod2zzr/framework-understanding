@@ -1,9 +1,10 @@
 """Circuit breaker pattern for LLM and embedding API calls.
 
-Three-state model:
+Four-state model:
 - CLOSED: Normal operation, requests pass through.
 - OPEN: Too many consecutive failures — fail fast without calling the API.
-- HALF_OPEN: After recovery timeout, allow one probe request through.
+- HALF_OPEN: Recovery timeout expired — exactly one probe is allowed.
+- PROBING: A probe request is in-flight; other callers are rejected.
 """
 
 import asyncio
@@ -50,39 +51,49 @@ class CircuitBreaker:
         that the coroutine is only created when the breaker decides to let
         the request through.
         """
+        is_probe = False
         async with self._lock:
-            if self._state == "OPEN":
+            if self._state == "CLOSED":
+                pass  # Allow through
+            elif self._state == "OPEN":
                 if time.monotonic() - self._last_failure_time >= self.recovery_timeout:
-                    self._state = "HALF_OPEN"
-                    logger.info("[%s] Circuit breaker HALF_OPEN — probing", self.name)
+                    # Transition to PROBING — only this coroutine gets through
+                    self._state = "PROBING"
+                    is_probe = True
+                    logger.info("[%s] Circuit breaker PROBING — sending probe", self.name)
                 else:
                     raise CircuitOpenError(
                         f"[{self.name}] Circuit breaker OPEN "
                         f"(failures={self._failure_count}, "
                         f"retry in {self.recovery_timeout - (time.monotonic() - self._last_failure_time):.0f}s)"
                     )
+            elif self._state in ("HALF_OPEN", "PROBING"):
+                # Another coroutine is already probing — reject
+                raise CircuitOpenError(
+                    f"[{self.name}] Circuit breaker {self._state} — probe in progress"
+                )
 
         try:
             result = await coro_factory()
         except Exception:
-            await self._on_failure()
+            await self._on_failure(is_probe)
             raise
         else:
-            await self._on_success()
+            await self._on_success(is_probe)
             return result
 
-    async def _on_success(self) -> None:
+    async def _on_success(self, was_probe: bool = False) -> None:
         async with self._lock:
             self._failure_count = 0
-            if self._state == "HALF_OPEN":
+            if was_probe or self._state == "PROBING":
                 logger.info("[%s] Circuit breaker CLOSED — probe succeeded", self.name)
             self._state = "CLOSED"
 
-    async def _on_failure(self) -> None:
+    async def _on_failure(self, was_probe: bool = False) -> None:
         async with self._lock:
             self._failure_count += 1
             self._last_failure_time = time.monotonic()
-            if self._state == "HALF_OPEN":
+            if was_probe or self._state == "PROBING":
                 self._state = "OPEN"
                 logger.warning(
                     "[%s] Circuit breaker OPEN — probe failed", self.name

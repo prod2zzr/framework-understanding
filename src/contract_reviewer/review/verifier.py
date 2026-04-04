@@ -94,13 +94,18 @@ class FindingVerifier:
 
     @staticmethod
     def _best_fuzzy_ratio(needle: str, haystack: str) -> float:
-        """Slide a window over haystack and return the best SequenceMatcher ratio."""
+        """Find the best SequenceMatcher ratio for needle within haystack."""
         if not needle or not haystack:
             return 0.0
+
+        # Fast path: case-insensitive substring check
+        if needle.lower() in haystack.lower():
+            return 1.0
+
         window = len(needle)
         best = 0.0
-        # Sample positions to avoid O(n*m) — check every half-window step
-        step = max(1, window // 2)
+        # Sample positions — check every quarter-window step for better coverage
+        step = max(1, window // 4)
         for start in range(0, max(1, len(haystack) - window + 1), step):
             segment = haystack[start : start + window + window // 4]
             ratio = SequenceMatcher(None, needle, segment).ratio()
@@ -115,19 +120,35 @@ class FindingVerifier:
         dim_results: dict[str, DimensionResult],
     ) -> int:
         """Boost severity when the same clause is flagged by multiple dimensions."""
-        # Collect (clause_text, dimension, finding) tuples
-        clause_dims: dict[str, list[tuple[str, RiskFinding]]] = {}
+        # Collect all findings with their dimension names
+        all_findings: list[tuple[str, RiskFinding]] = []
         for dim_name, dim_result in dim_results.items():
             if not dim_result.success:
                 continue
             for risk in dim_result.risks:
-                if not risk.clause_text:
+                if risk.clause_text:
+                    all_findings.append((dim_name, risk))
+
+        # Group similar clause texts using pairwise similarity
+        # For typical review output (<50 findings), O(n²) is acceptable
+        groups: list[list[tuple[str, RiskFinding]]] = []
+        assigned: set[int] = set()
+        for i, (dim_i, risk_i) in enumerate(all_findings):
+            if i in assigned:
+                continue
+            group = [(dim_i, risk_i)]
+            assigned.add(i)
+            for j, (dim_j, risk_j) in enumerate(all_findings):
+                if j in assigned:
                     continue
-                key = risk.clause_text[:80]  # Normalize by prefix
-                clause_dims.setdefault(key, []).append((dim_name, risk))
+                ratio = SequenceMatcher(None, risk_i.clause_text, risk_j.clause_text).ratio()
+                if ratio > 0.7:
+                    group.append((dim_j, risk_j))
+                    assigned.add(j)
+            groups.append(group)
 
         boost_count = 0
-        for key, entries in clause_dims.items():
+        for entries in groups:
             dims_involved = {dim for dim, _ in entries}
             if len(dims_involved) >= 2:
                 # Boost all findings for this clause

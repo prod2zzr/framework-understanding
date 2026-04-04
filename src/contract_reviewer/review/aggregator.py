@@ -3,7 +3,6 @@
 from difflib import SequenceMatcher
 
 from contract_reviewer.models.review import DimensionResult, ReviewReport, RiskFinding
-from contract_reviewer.review.learnings import extract_candidate_rules
 
 
 def deduplicate_risks(risks: list[RiskFinding], threshold: float = 0.85) -> list[RiskFinding]:
@@ -112,10 +111,10 @@ def format_report_markdown(report: ReviewReport) -> str:
             lines.append("")
 
     # Candidate new rules (institutional memory)
-    if hasattr(report, '_candidate_rules') and report._candidate_rules:  # type: ignore[attr-defined]
+    if report.candidate_rules:
         lines.append("## 候选新规则\n")
         lines.append("> 以下风险发现不属于已有合规规则，建议法务评估后纳入规则库。\n")
-        for cr in report._candidate_rules:  # type: ignore[attr-defined]
+        for cr in report.candidate_rules:
             lines.append(f"- **{cr['id']}** [{cr['severity'].upper()}] {cr['description']}")
             if cr.get("evidence_example"):
                 lines.append(f"  > 示例: {cr['evidence_example'][:100]}")

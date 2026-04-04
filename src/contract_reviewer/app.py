@@ -78,8 +78,9 @@ async def startup() -> None:
 async def _verify_api_key(request: Request) -> None:
     """Optional API key authentication. Skipped if CR_API_KEY is not set."""
     if _settings and _settings.api_key:
-        key = request.headers.get("X-API-Key")
-        if key != _settings.api_key:
+        import hmac
+        key = request.headers.get("X-API-Key") or ""
+        if not hmac.compare_digest(key, _settings.api_key):
             raise HTTPException(401, "Invalid or missing API key")
 
 

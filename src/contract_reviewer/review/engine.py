@@ -90,12 +90,15 @@ class ReviewEngine:
         active_dims = dimensions or self.settings.review_dimensions
         system_prompt = self.prompt_builder.build_system_prompt()
 
-        # Audit trail
-        self._audit = AuditTrail(contract.name)
-        self._audit.log("review_start", detail={"dimensions": active_dims})
+        # Local audit trail — avoids race condition if review() is called concurrently
+        audit = AuditTrail(contract.name)
+        audit.log("review_start", detail={"dimensions": active_dims})
 
         # Lifecycle hooks
         await call_hooks(self.hooks, "on_review_start", contract)
+
+        # Cache plugins once per review (not per-chunk)
+        plugins = list(get_all_plugins().values())
 
         # Run dimensions concurrently — track which dims actually run
         run_dims: list[str] = []
@@ -108,7 +111,7 @@ class ReviewEngine:
             run_dims.append(dim_name)
             tasks.append(
                 self._run_dimension(
-                    contract, dim_spec, system_prompt, on_progress
+                    contract, dim_spec, system_prompt, on_progress, audit, plugins
                 )
             )
 
@@ -128,15 +131,7 @@ class ReviewEngine:
         # Independent verification stage
         verifier = FindingVerifier()
         verification_summary = verifier.verify_all(dim_results, contract.full_text)
-        self._audit.log("verification_complete", detail=verification_summary)
-
-        report = ReviewReport(
-            contract_name=contract.name,
-            dimensions=dim_results,
-            overall_risk_score=self._compute_risk_score(dim_results),
-            verification_summary=verification_summary,
-            audit_summary=self._audit.summary(),
-        )
+        audit.log("verification_complete", detail=verification_summary)
 
         # Extract candidate rules (institutional memory)
         all_risks = [
@@ -144,16 +139,24 @@ class ReviewEngine:
         ]
         candidate_rules = extract_candidate_rules(all_risks, self.rules)
         if candidate_rules:
-            report._candidate_rules = candidate_rules  # type: ignore[attr-defined]
-            self._audit.log("candidate_rules", detail={
+            audit.log("candidate_rules", detail={
                 "count": len(candidate_rules),
                 "ids": [c["id"] for c in candidate_rules],
             })
 
+        report = ReviewReport(
+            contract_name=contract.name,
+            dimensions=dim_results,
+            overall_risk_score=self._compute_risk_score(dim_results),
+            verification_summary=verification_summary,
+            audit_summary=audit.summary(),
+            candidate_rules=candidate_rules,
+        )
+
         # Generate summary
         report.summary = await self._generate_summary(report, system_prompt)
 
-        self._audit.log("review_complete", detail={
+        audit.log("review_complete", detail={
             "overall_risk_score": report.overall_risk_score,
             "dimensions_succeeded": [d for d, r in dim_results.items() if r.success],
             "dimensions_failed": [d for d, r in dim_results.items() if not r.success],
@@ -162,8 +165,8 @@ class ReviewEngine:
         # Lifecycle hooks
         await call_hooks(self.hooks, "on_report_ready", report)
 
-        # Expose audit trail for CLI/API to save
-        report._audit_trail = self._audit  # type: ignore[attr-defined]
+        # Store audit trail for callers that need to persist it
+        self._last_audit_trail = audit
 
         return report
 
@@ -173,9 +176,12 @@ class ReviewEngine:
         dim_spec: DimensionSpec,
         system_prompt: str,
         on_progress: Callable[[ProgressEvent], Any] | None,
+        audit: AuditTrail | None = None,
+        plugins: list | None = None,
     ) -> DimensionResult:
         """Run a single review dimension across relevant contract chunks."""
-        self._audit.log("dimension_start", dimension=dim_spec.name)
+        if audit:
+            audit.log("dimension_start", dimension=dim_spec.name)
         if on_progress:
             await _call_progress(on_progress, ProgressEvent(
                 dimension=dim_spec.name, status="started",
@@ -237,7 +243,7 @@ class ReviewEngine:
                                 logger.warning("Skipping malformed compliance result: %s", e)
 
             # Run applicable plugins on this chunk
-            for plugin in get_all_plugins().values():
+            for plugin in (plugins or []):
                 try:
                     if plugin.applicable_to(chunk):
                         plugin_findings = await plugin.review_chunk(

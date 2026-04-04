@@ -93,6 +93,7 @@ class ReviewReport(BaseModel):
     dimensions: dict[str, DimensionResult] = {}
     verification_summary: dict = Field(default_factory=dict, description="验证摘要")
     audit_summary: dict = Field(default_factory=dict, description="审计摘要")
+    candidate_rules: list[dict] = Field(default_factory=list, description="候选新规则")
 
     def risk_score_label(self) -> str:
         if self.overall_risk_score >= 70:

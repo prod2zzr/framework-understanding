@@ -26,6 +26,7 @@ from contract_reviewer.rag.retriever import Retriever
 from contract_reviewer.rag.vectorstore import VectorStore
 from contract_reviewer.review.aggregator import format_report_markdown
 from contract_reviewer.review.batch import batch_review
+from contract_reviewer.plugins.registry import discover_plugins
 from contract_reviewer.review.engine import ReviewEngine
 from contract_reviewer.review import rule_history
 
@@ -48,6 +49,7 @@ def _load_rules(rules_path: str) -> list[dict]:
 
 def _build_engine(settings: Settings, rules: list[dict]) -> tuple[ReviewEngine, Retriever | None]:
     """Build the review engine with all dependencies."""
+    discover_plugins()
     llm = LLMClient(settings)
     prompt_builder = PromptBuilder(
         prompts_dir=settings.prompts_dir,
@@ -173,7 +175,7 @@ def review(
             console.print(result)
 
     # Save audit trail if requested
-    audit_trail = getattr(report, "_audit_trail", None)
+    audit_trail = getattr(engine, "_last_audit_trail", None)
     if audit_trail and audit_log:
         audit_trail.save(Path(audit_log))
         console.print(f"[dim]审计日志已保存: {audit_log}[/dim]")

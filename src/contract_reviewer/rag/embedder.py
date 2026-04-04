@@ -1,11 +1,10 @@
 """Embedding abstraction supporting cloud and local models."""
 
-import asyncio
 import logging
-import random
 
 import litellm
 
+from contract_reviewer.llm.retry import retry_with_backoff
 from contract_reviewer.models.config import Settings
 
 logger = logging.getLogger(__name__)
@@ -14,9 +13,9 @@ logger = logging.getLogger(__name__)
 MAX_BATCH_SIZE = 96
 # Timeout for embedding calls (seconds)
 EMBED_TIMEOUT = 60
-# Retry defaults for embedding calls
-_MAX_RETRIES = 2
-_RETRY_BASE_DELAY = 1.0
+
+# Transient exceptions worth retrying
+_RETRYABLE = (litellm.APIConnectionError, litellm.Timeout, litellm.RateLimitError)
 
 
 class EmbeddingError(Exception):
@@ -51,33 +50,27 @@ class Embedder:
         if self.api_base:
             kwargs["api_base"] = self.api_base
 
-        last_error: Exception | None = None
-        for attempt in range(_MAX_RETRIES + 1):
-            try:
-                response = await litellm.aembedding(**kwargs)
-                data = getattr(response, "data", None)
-                if not data:
-                    raise EmbeddingError("Embedding response has no data")
-                return [item["embedding"] for item in data]
-            except (litellm.APIConnectionError, litellm.Timeout, litellm.RateLimitError) as e:
-                last_error = e
-                if attempt < _MAX_RETRIES:
-                    wait = _RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.3)
-                    logger.warning(
-                        "Embedding retry %d/%d after %.1fs: %s",
-                        attempt + 1, _MAX_RETRIES, wait, e,
-                    )
-                    await asyncio.sleep(wait)
-                else:
-                    raise EmbeddingError(
-                        f"Embedding API call failed after {_MAX_RETRIES} retries: {e}"
-                    ) from e
-            except litellm.APIError as e:
-                raise EmbeddingError(f"Embedding API call failed: {e}") from e
-            except Exception as e:
-                raise EmbeddingError(f"Unexpected embedding error: {e}") from e
+        try:
+            response = await retry_with_backoff(
+                lambda: litellm.aembedding(**kwargs),
+                retryable_exceptions=_RETRYABLE,
+                max_retries=2,
+                base_delay=1.0,
+                jitter=0.3,
+                description="Embedding",
+            )
+        except _RETRYABLE as e:
+            raise EmbeddingError(f"Embedding API call failed after retries: {e}") from e
+        except litellm.APIError as e:
+            raise EmbeddingError(f"Embedding API call failed: {e}") from e
+        except Exception as e:
+            raise EmbeddingError(f"Unexpected embedding error: {e}") from e
 
-        raise EmbeddingError(f"Embedding failed: {last_error}") from last_error
+        data = getattr(response, "data", None)
+        if not data:
+            raise EmbeddingError("Embedding response has no data")
+
+        return [item["embedding"] for item in data]
 
     async def embed_single(self, text: str) -> list[float]:
         """Embed a single text."""

@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import random
 from typing import Any, AsyncIterator
 
 import litellm
@@ -12,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from contract_reviewer.llm.cache import ResponseCache
 from contract_reviewer.llm.circuit_breaker import CircuitBreaker, CircuitOpenError
+from contract_reviewer.llm.retry import retry_with_backoff
 from contract_reviewer.llm.token_budget import TokenBudget
 from contract_reviewer.models.config import Settings
 
