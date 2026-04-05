@@ -136,25 +136,35 @@ class TestMergeParts:
 
 
 class TestTokenSplit:
-    """_split_by_tokens 最后手段分块。
-
-    注意: _split_by_tokens 存在一个已知 bug — 当剩余 token 数 < chunk_size 时，
-    overlap 导致 start 不前进，造成无限循环。这里用 overlap=0 绕过测试。
-    Bug 详情: start = end - overlap, 当 end == len(tokens) 且
-    len(tokens) - overlap < start 的上一轮值时，循环永不终止。
-    """
+    """_split_by_tokens 最后手段分块。"""
 
     def test_split_by_tokens_produces_chunks(self) -> None:
         """无分隔符的长文本应按 token 数硬切。"""
         text = "甲方" * 500
-        # overlap=0 绕过无限循环 bug
-        splitter = _make_splitter(chunk_size=64, overlap=0)
+        splitter = _make_splitter(chunk_size=64, overlap=8)
         result = splitter._split_by_tokens(text)
         assert len(result) > 1
 
+    def test_split_by_tokens_with_overlap_terminates(self) -> None:
+        """overlap>0 时不应无限循环（回归测试）。"""
+        text = "字" * 200
+        splitter = _make_splitter(chunk_size=64, overlap=16)
+        result = splitter._split_by_tokens(text)
+        # 200 tokens / (64-16) advance = ~5 chunks
+        assert 3 <= len(result) <= 6
+
     def test_split_by_tokens_exact_multiple(self) -> None:
         """文本长度是 chunk_size 整数倍时应正常切分。"""
-        text = "字" * 128  # 恰好 2 个 chunk
+        text = "字" * 128
         splitter = _make_splitter(chunk_size=64, overlap=0)
         result = splitter._split_by_tokens(text)
         assert len(result) == 2
+
+    def test_split_by_tokens_covers_all_content(self) -> None:
+        """所有 token 都应被至少一个 chunk 覆盖。"""
+        text = "字" * 100
+        splitter = _make_splitter(chunk_size=30, overlap=5)
+        result = splitter._split_by_tokens(text)
+        # 每个 chunk 的 decode 结果拼接后长度应 >= 原始长度
+        total_chars = sum(len(c) for c in result)
+        assert total_chars >= 100

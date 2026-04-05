@@ -120,7 +120,9 @@ class ContractSplitter:
             end = min(start + self.chunk_size, len(tokens))
             chunk_tokens = tokens[start:end]
             chunks.append(self._enc.decode(chunk_tokens))
-            start = end - self.overlap  # Overlap
+            if end >= len(tokens):
+                break  # 已到末尾，不再回退 overlap
+            start = end - self.overlap
         return chunks
 
     def _count_tokens(self, text: str) -> int:
