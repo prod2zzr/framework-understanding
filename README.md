@@ -26,8 +26,7 @@ export ANTHROPIC_API_KEY=your_key_here
 contract-review ./合同.pdf
 
 # 使用本地模型
-export CR_LLM_MODEL="ollama/qwen2.5:72b"
-export CR_LLM_MAX_CONCURRENT=1
+export CR_LLM_MODEL="ollama/qwen3.5:9b"
 contract-review ./合同.pdf
 
 # JSON 输出
@@ -71,7 +70,7 @@ curl -X POST http://localhost:8000/api/review/stream \
 | `CR_LLM_MODEL` | LLM 模型 | `anthropic/claude-sonnet-4-20250514` |
 | `CR_LLM_API_BASE` | 本地模型 API 地址 | - |
 | `CR_LLM_MAX_CONCURRENT` | 最大并发 LLM 调用 | `5` |
-| `CR_EMBEDDING_MODEL` | 嵌入模型 | `ollama/bge-large-zh` |
+| `CR_EMBEDDING_MODEL` | 嵌入模型 | `ollama/qwen3-embedding:0.6b` |
 | `CR_VECTORSTORE_PATH` | 向量库路径 | `./data/chroma` |
 
 ## 项目结构
@@ -94,10 +93,19 @@ config/
 └── settings.yaml       # 默认配置
 ```
 
+## 部署
+
+详细部署指南（硬件选购、容量规划、多用户并发配置）见 [docs/guides/deployment.md](docs/guides/deployment.md)。
+
+支持三种部署方式：
+- **本地部署**（Mac Mini / Linux）— 合同不出本机，零费用
+- **云端 API**（Claude / OpenAI）— 10 分钟上手，按量付费
+- **Docker** — 适合服务器部署或团队共享
+
 ## 技术栈
 
 - **LLM**: LiteLLM（统一 Claude/Ollama/vLLM 接口）
 - **向量库**: ChromaDB
-- **嵌入**: bge-large-zh（本地）/ text-embedding-3-small（云端）
+- **嵌入**: Qwen3-Embedding-0.6B（本地）/ text-embedding-3-small（云端）
 - **Web**: FastAPI + SSE
 - **CLI**: Typer + Rich
