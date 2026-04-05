@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{PRESENTATION_TITLE}</title>
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* ── 视觉系统（替换此处的变量值来改变主题） ── */
+    :root {
+      --color-bg: #0f172a;
+      --color-surface: #1e293b;
+      --color-text: #f1f5f9;
+      --color-text-secondary: #94a3b8;
+      --color-accent: #38bdf8;
+      --font-display: 'Segoe UI', system-ui, sans-serif;
+      --font-body: 'Segoe UI', system-ui, sans-serif;
+      --transition-slide: 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* ── Container：演示舞台 ── */
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-body);
+    }
+
+    .presentation {
+      position: relative;
+      width: 100%; height: 100%;
+      overflow: hidden;
+    }
+
+    /* ── Slides：每一页内容 ── */
+    .slides-track {
+      display: flex;
+      height: 100%;
+      transition: transform var(--transition-slide);
+    }
+
+    .slide {
+      flex: 0 0 100%;
+      width: 100%; height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 3rem 5rem;
+      text-align: center;
+    }
+
+    .slide h1 {
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 5vw, 4rem);
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 1rem;
+    }
+
+    .slide h2 {
+      font-family: var(--font-display);
+      font-size: clamp(1.5rem, 4vw, 3rem);
+      font-weight: 600;
+      line-height: 1.3;
+      margin-bottom: 1.5rem;
+    }
+
+    .slide p {
+      font-size: clamp(1rem, 2vw, 1.5rem);
+      color: var(--color-text-secondary);
+      max-width: 40ch;
+      line-height: 1.6;
+    }
+
+    .slide ul {
+      list-style: none;
+      text-align: left;
+      font-size: clamp(1rem, 1.8vw, 1.3rem);
+      line-height: 2;
+      color: var(--color-text-secondary);
+    }
+
+    .slide ul li::before {
+      content: '→ ';
+      color: var(--color-accent);
+    }
+
+    .slide .subtitle {
+      font-size: clamp(1rem, 2vw, 1.5rem);
+      color: var(--color-accent);
+      margin-bottom: 0.5rem;
+    }
+
+    /* ── Controls：按钮 + 页码 ── */
+    .controls {
+      position: fixed;
+      bottom: 2rem;
+      left: 0; right: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 2rem;
+      z-index: 100;
+    }
+
+    .controls button {
+      background: var(--color-surface);
+      color: var(--color-text);
+      border: 1px solid var(--color-text-secondary);
+      border-radius: 6px;
+      padding: 0.5rem 1.2rem;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .controls button:hover {
+      background: var(--color-accent);
+      border-color: var(--color-accent);
+    }
+
+    .controls button:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+
+    .slide-counter {
+      font-size: 0.9rem;
+      color: var(--color-text-secondary);
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+
+<div class="presentation">
+  <div class="slides-track" id="slidesTrack">
+
+    <!-- ====== Slide 1: 封面 ====== -->
+    <section class="slide">
+      <p class="subtitle">{SUBTITLE}</p>
+      <h1>{PRESENTATION_TITLE}</h1>
+      <p>{AUTHOR} · {DATE}</p>
+    </section>
+
+    <!-- ====== Slide 2: 示例页 ====== -->
+    <section class="slide">
+      <h2>{SLIDE_2_TITLE}</h2>
+      <ul>
+        <li>{POINT_1}</li>
+        <li>{POINT_2}</li>
+        <li>{POINT_3}</li>
+      </ul>
+    </section>
+
+    <!-- ====== Slide 3: 示例页 ====== -->
+    <section class="slide">
+      <h2>{SLIDE_3_TITLE}</h2>
+      <p>{SLIDE_3_CONTENT}</p>
+    </section>
+
+    <!-- ====== 更多 Slide 在此添加 ====== -->
+
+    <!-- ====== 结尾页 ====== -->
+    <section class="slide">
+      <h2>Thank You</h2>
+      <p>{CLOSING_MESSAGE}</p>
+    </section>
+
+  </div>
+</div>
+
+<!-- Controls -->
+<div class="controls">
+  <button id="prevBtn" onclick="prevSlide()">← 上一页</button>
+  <span class="slide-counter" id="counter">1 / 4</span>
+  <button id="nextBtn" onclick="nextSlide()">下一页 →</button>
+</div>
+
+<script>
+  // ── Index：当前页索引 ──
+  let currentIndex = 0;
+  const track = document.getElementById('slidesTrack');
+  const slides = track.querySelectorAll('.slide');
+  const total = slides.length;
+  const counter = document.getElementById('counter');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+
+  function goToSlide(index) {
+    if (index < 0 || index >= total) return;
+    currentIndex = index;
+    // Motion：用 transform 移动整个轨道
+    track.style.transform = `translateX(-${currentIndex * 100}%)`;
+    // 更新 UI
+    counter.textContent = `${currentIndex + 1} / ${total}`;
+    prevBtn.disabled = currentIndex === 0;
+    nextBtn.disabled = currentIndex === total - 1;
+  }
+
+  function nextSlide() { goToSlide(currentIndex + 1); }
+  function prevSlide() { goToSlide(currentIndex - 1); }
+
+  // ── Controls：键盘支持 ──
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ') {
+      e.preventDefault();
+      nextSlide();
+    }
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      prevSlide();
+    }
+  });
+
+  // 初始化
+  goToSlide(0);
+</script>
+
+</body>
+</html>

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{PRESENTATION_TITLE}</title>
+
+  <!-- reveal.js CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/theme/black.css" id="theme">
+
+  <!-- 代码高亮插件 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/highlight/monokai.css">
+
+  <!-- Google Fonts（替换为选定字体） -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    /* ── 覆盖 reveal.js 默认主题 ── */
+
+    /* 视觉系统变量 */
+    :root {
+      --r-background-color: #0f172a;
+      --r-main-font: 'Inter', 'Noto Sans SC', sans-serif;
+      --r-main-font-size: 28px;
+      --r-main-color: #f1f5f9;
+      --r-heading-font: 'Inter', 'Noto Sans SC', sans-serif;
+      --r-heading-color: #f1f5f9;
+      --r-heading-letter-spacing: -0.02em;
+      --r-heading-text-transform: none;
+      --r-heading1-size: 2.8em;
+      --r-heading2-size: 1.8em;
+      --r-heading3-size: 1.2em;
+      --r-link-color: #38bdf8;
+      --r-link-color-hover: #0ea5e9;
+      --r-selection-background-color: rgba(56, 189, 248, 0.3);
+
+      /* 扩展变量 */
+      --color-surface: #1e293b;
+      --color-text-secondary: #94a3b8;
+      --color-accent: #38bdf8;
+      --color-success: #22c55e;
+      --color-warning: #f59e0b;
+      --font-mono: 'Fira Code', monospace;
+      --space-sm: 0.5rem;
+      --space-md: 1rem;
+      --space-lg: 2rem;
+      --space-xl: 4rem;
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 16px;
+    }
+
+    /* 全局样式 */
+    .reveal {
+      font-weight: 400;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .reveal h1, .reveal h2, .reveal h3 {
+      font-weight: 700;
+      line-height: 1.2;
+    }
+
+    .reveal h3 {
+      color: var(--color-accent);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+      font-size: var(--r-heading3-size);
+    }
+
+    .reveal p {
+      color: var(--color-text-secondary);
+      line-height: 1.7;
+      max-width: 50ch;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .reveal ul, .reveal ol {
+      display: block;
+      text-align: left;
+      margin-left: 2em;
+    }
+
+    .reveal li {
+      color: var(--color-text-secondary);
+      line-height: 1.8;
+      margin-bottom: 0.3em;
+    }
+
+    .reveal li::marker {
+      color: var(--color-accent);
+    }
+
+    /* ── 组件样式 ── */
+
+    /* 副标题 */
+    .subtitle {
+      color: var(--color-accent) !important;
+      font-size: 0.8em !important;
+      font-weight: 500;
+      margin-bottom: 0.3em !important;
+    }
+
+    /* 统计数字 */
+    .stat-number {
+      font-size: 4em !important;
+      font-weight: 700;
+      color: var(--color-accent);
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* 高亮文本 */
+    .highlight {
+      color: var(--color-accent);
+      font-weight: 600;
+    }
+
+    /* 卡片 */
+    .card {
+      background: var(--color-surface);
+      border-radius: var(--radius-md);
+      padding: var(--space-lg);
+      border: 1px solid rgba(255,255,255,0.05);
+      text-align: left;
+    }
+
+    /* 双栏 */
+    .two-column {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-lg);
+      width: 100%;
+    }
+
+    /* 三栏 */
+    .three-column {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: var(--space-md);
+      width: 100%;
+    }
+
+    /* 图片容器 */
+    .image-container {
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+
+    .image-container img {
+      width: 100%;
+      height: auto;
+    }
+
+    /* 代码块增强 */
+    .reveal pre {
+      border-radius: var(--radius-md);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    .reveal pre code {
+      font-family: var(--font-mono);
+      font-size: 0.7em;
+      line-height: 1.5;
+      padding: var(--space-lg) !important;
+    }
+
+    /* 引用 */
+    .reveal blockquote {
+      border-left: 3px solid var(--color-accent);
+      padding-left: var(--space-lg);
+      font-style: italic;
+      color: var(--color-text-secondary);
+      background: none;
+      box-shadow: none;
+      width: auto;
+      max-width: 40ch;
+      margin: 0 auto;
+      text-align: left;
+    }
+
+    /* ── Fragment 动画增强 ── */
+    .reveal .slides section .fragment.fade-up {
+      transform: translateY(40px);
+    }
+
+    .reveal .slides section .fragment.scale-up {
+      transform: scale(0.8);
+    }
+
+    /* ── Speaker Notes 样式 ── */
+    .reveal .speaker-notes {
+      font-family: var(--r-main-font);
+    }
+
+    /* ── 打印/PDF 导出 ── */
+    @media print {
+      .reveal .slides section {
+        page-break-after: always;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="reveal">
+  <div class="slides">
+
+    <!-- ====== Slide 1: 封面 ====== -->
+    <section>
+      <p class="subtitle">{SUBTITLE}</p>
+      <h1>{PRESENTATION_TITLE}</h1>
+      <p>{AUTHOR} · {DATE}</p>
+
+      <aside class="notes">
+        Speaker notes: 开场白和背景介绍。
+      </aside>
+    </section>
+
+    <!-- ====== Slide 2: 带 Fragment 的要点页 ====== -->
+    <section>
+      <h2>{SLIDE_2_TITLE}</h2>
+      <ul>
+        <li class="fragment fade-up">{POINT_1}</li>
+        <li class="fragment fade-up">{POINT_2}</li>
+        <li class="fragment fade-up">{POINT_3}</li>
+      </ul>
+
+      <aside class="notes">
+        逐条展示要点，每条配合口头说明。
+      </aside>
+    </section>
+
+    <!-- ====== Slide 3: Auto-Animate 示例 ====== -->
+    <section data-auto-animate>
+      <h2 data-id="title">{SLIDE_3_TITLE}</h2>
+    </section>
+    <section data-auto-animate>
+      <h2 data-id="title" style="font-size: 0.8em; margin-bottom: 0.5em;">{SLIDE_3_TITLE}</h2>
+      <p>{SLIDE_3_CONTENT}</p>
+    </section>
+
+    <!-- ====== Slide 4: 统计数字 ====== -->
+    <section>
+      <h3>{METRIC_LABEL}</h3>
+      <div class="stat-number fragment">{STAT_VALUE}</div>
+      <p class="fragment">{STAT_DESCRIPTION}</p>
+    </section>
+
+    <!-- ====== Slide 5: 双栏布局 ====== -->
+    <section>
+      <h2>{SLIDE_5_TITLE}</h2>
+      <div class="two-column">
+        <div class="card fragment">
+          <h3>{COL_1_TITLE}</h3>
+          <p>{COL_1_CONTENT}</p>
+        </div>
+        <div class="card fragment">
+          <h3>{COL_2_TITLE}</h3>
+          <p>{COL_2_CONTENT}</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== Slide 6: 代码展示 ====== -->
+    <section>
+      <h2>{CODE_SLIDE_TITLE}</h2>
+      <pre><code data-trim data-noescape data-line-numbers class="language-{LANGUAGE}">
+{CODE_CONTENT}
+      </code></pre>
+    </section>
+
+    <!-- ====== Slide 7: 图片页 ====== -->
+    <section>
+      <h2>{IMAGE_SLIDE_TITLE}</h2>
+      <div class="image-container">
+        <img src="{IMAGE_URL}" alt="{IMAGE_ALT}">
+      </div>
+    </section>
+
+    <!-- ====== Slide 8: Markdown 示例（可选） ====== -->
+    <section data-markdown>
+      <textarea data-template>
+## {MARKDOWN_SLIDE_TITLE}
+
+{MARKDOWN_CONTENT}
+
+- 支持 **粗体** 和 *斜体*
+- 支持 `行内代码`
+- 支持 [链接](https://example.com)
+      </textarea>
+    </section>
+
+    <!-- ====== Slide 9: 垂直 Slide 示例（子页面） ====== -->
+    <section>
+      <section>
+        <h2>{VERTICAL_TITLE}</h2>
+        <p>按 ↓ 查看子页面</p>
+      </section>
+      <section>
+        <h3>{VERTICAL_SUB_1}</h3>
+        <p>{VERTICAL_SUB_1_CONTENT}</p>
+      </section>
+      <section>
+        <h3>{VERTICAL_SUB_2}</h3>
+        <p>{VERTICAL_SUB_2_CONTENT}</p>
+      </section>
+    </section>
+
+    <!-- ====== 更多 Slide 在此添加 ====== -->
+
+    <!-- ====== 结尾页 ====== -->
+    <section>
+      <h2>Thank You</h2>
+      <p>{CLOSING_MESSAGE}</p>
+    </section>
+
+  </div>
+</div>
+
+<!-- reveal.js Core -->
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/dist/reveal.js"></script>
+
+<!-- reveal.js Plugins -->
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/markdown/markdown.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/highlight/highlight.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/notes/notes.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/reveal.js@5/plugin/math/math.js"></script>
+
+<script>
+  Reveal.initialize({
+    // 基础配置
+    hash: true,                    // URL 哈希同步（#/0/1）
+    respondToHashChanges: true,
+    history: true,                 // 浏览器历史支持
+
+    // 展示配置
+    width: 1920,                   // 基准宽度
+    height: 1080,                  // 基准高度（16:9）
+    margin: 0.04,
+    minScale: 0.2,
+    maxScale: 2.0,
+
+    // 切换配置
+    transition: 'slide',           // none/fade/slide/convex/concave/zoom
+    transitionSpeed: 'default',    // default/fast/slow
+    backgroundTransition: 'fade',
+
+    // Fragment 配置
+    fragments: true,
+
+    // Auto-Animate 配置
+    autoAnimate: true,
+    autoAnimateEasing: 'ease',
+    autoAnimateDuration: 0.8,
+    autoAnimateUnmatched: false,
+
+    // 控件配置
+    controls: true,
+    controlsTutorial: true,
+    controlsLayout: 'bottom-right',
+    progress: true,                // 进度条
+    slideNumber: true,             // 页码
+    showSlideNumber: 'all',
+
+    // 导航配置
+    keyboard: true,
+    touch: true,
+    loop: false,
+    navigationMode: 'default',
+
+    // 其他
+    center: true,
+    embedded: false,
+    help: true,                    // 按 ? 显示帮助
+
+    // 插件
+    plugins: [
+      RevealMarkdown,
+      RevealHighlight,
+      RevealNotes,
+      RevealMath.KaTeX
+    ]
+  });
+</script>
+
+</body>
+</html>
