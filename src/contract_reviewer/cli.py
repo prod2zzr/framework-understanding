@@ -30,6 +30,8 @@ from contract_reviewer.plugins.registry import discover_plugins
 from contract_reviewer.review.engine import ReviewEngine
 from contract_reviewer.review import rule_history
 
+logger = logging.getLogger(__name__)
+
 app = typer.Typer(
     name="contract-review",
     help="AI 合同审核工具 — 支持云端/本地模型",
@@ -247,6 +249,192 @@ def ingest(
         added = asyncio.run(ingestor.ingest_directory(knowledge_dir, source_type))
 
     console.print(f"[green]已添加 {added} 个知识块, 总计 {vectorstore.count} 个[/green]")
+
+
+@app.command("accept-rule")
+def accept_rule(
+    report_path: Annotated[str, typer.Argument(help="审查报告 JSON 文件路径")],
+    rule_id: Annotated[Optional[str], typer.Option("--id", help="指定候选规则 ID（省略则交互选择）")] = None,
+    rules_file: Annotated[Optional[str], typer.Option("--rules", "-r", help="目标规则文件")] = None,
+    all_rules: Annotated[bool, typer.Option("--all", help="接受所有候选规则")] = False,
+) -> None:
+    """将审查报告中的候选规则纳入规则库。"""
+    # 加载报告
+    report_file = Path(report_path)
+    if not report_file.exists():
+        console.print(f"[red]报告文件不存在: {report_path}[/red]")
+        raise typer.Exit(1)
+
+    report_data = json.loads(report_file.read_text(encoding="utf-8"))
+    candidates = report_data.get("candidate_rules", [])
+    if not candidates:
+        console.print("[yellow]报告中无候选规则[/yellow]")
+        raise typer.Exit(0)
+
+    # 选择要接受的规则
+    if all_rules:
+        selected = candidates
+    elif rule_id:
+        selected = [c for c in candidates if c["id"] == rule_id]
+        if not selected:
+            console.print(f"[red]未找到候选规则: {rule_id}[/red]")
+            console.print("可用候选规则:")
+            for c in candidates:
+                console.print(f"  {c['id']}: {c.get('description', '')[:80]}")
+            raise typer.Exit(1)
+    else:
+        # 展示候选规则供用户确认
+        console.print("[bold]候选规则:[/bold]\n")
+        for i, c in enumerate(candidates, 1):
+            console.print(f"  {i}. [{c.get('severity', 'medium').upper()}] {c['id']}")
+            console.print(f"     {c.get('description', '')[:100]}")
+            if c.get("evidence_example"):
+                console.print(f"     [dim]示例: {c['evidence_example'][:80]}...[/dim]")
+            console.print()
+
+        choice = typer.prompt("输入序号（逗号分隔，或 'all'）", default="all")
+        if choice.strip().lower() == "all":
+            selected = candidates
+        else:
+            indices = [int(x.strip()) - 1 for x in choice.split(",") if x.strip().isdigit()]
+            selected = [candidates[i] for i in indices if 0 <= i < len(candidates)]
+
+    if not selected:
+        console.print("[yellow]未选择任何规则[/yellow]")
+        raise typer.Exit(0)
+
+    # 加载目标规则文件
+    settings = Settings()
+    target_path = Path(rules_file or settings.rules_path)
+    if not target_path.exists():
+        console.print(f"[red]规则文件不存在: {target_path}[/red]")
+        raise typer.Exit(1)
+
+    with open(target_path, encoding="utf-8") as f:
+        rules_data = yaml.safe_load(f)
+
+    existing_ids = {r["id"] for r in rules_data.get("compliance_rules", [])}
+
+    # 追加新规则
+    added = 0
+    from datetime import date
+    for candidate in selected:
+        if candidate["id"] in existing_ids:
+            console.print(f"  [yellow]跳过（已存在）: {candidate['id']}[/yellow]")
+            continue
+        new_rule = {
+            "id": candidate["id"],
+            "description": candidate.get("description", ""),
+            "category": candidate.get("category", "general"),
+            "severity": candidate.get("severity", "medium"),
+            "added_date": date.today().isoformat(),
+            "source": "auto_discovered",
+        }
+        rules_data["compliance_rules"].append(new_rule)
+        added += 1
+        console.print(f"  [green]✓ 已添加: {candidate['id']}[/green]")
+
+    if added > 0:
+        with open(target_path, "w", encoding="utf-8") as f:
+            yaml.dump(rules_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+        console.print(f"\n[green]{added} 条规则已写入 {target_path}[/green]")
+
+        # 记录规则文件变更
+        if rule_history.check_and_record(str(target_path)):
+            console.print("[dim]规则文件版本已记录[/dim]")
+    else:
+        console.print("[yellow]无新规则添加[/yellow]")
+
+
+@app.command("audit-summary")
+def audit_summary(
+    audit_path: Annotated[str, typer.Argument(help="审计日志 JSONL 文件路径")],
+    contract: Annotated[Optional[str], typer.Option("--contract", "-c", help="按合同名称过滤")] = None,
+) -> None:
+    """查看审计日志的人类可读摘要。"""
+    path = Path(audit_path)
+    if not path.exists():
+        console.print(f"[red]审计日志不存在: {audit_path}[/red]")
+        raise typer.Exit(1)
+
+    # 解析 JSONL
+    entries = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                entries.append(json.loads(line))
+
+    if not entries:
+        console.print("[yellow]审计日志为空[/yellow]")
+        raise typer.Exit(0)
+
+    # 按合同分组
+    contracts: dict[str, list[dict]] = {}
+    for entry in entries:
+        name = entry.get("contract", "unknown")
+        if contract and contract != name:
+            continue
+        contracts.setdefault(name, []).append(entry)
+
+    if not contracts:
+        console.print(f"[yellow]未找到合同: {contract}[/yellow]")
+        raise typer.Exit(0)
+
+    for name, events in contracts.items():
+        console.print(Panel(f"[bold]{name}[/bold]", style="blue"))
+
+        # 事件统计
+        event_counts: dict[str, int] = {}
+        for e in events:
+            evt = e.get("event", "unknown")
+            event_counts[evt] = event_counts.get(evt, 0) + 1
+
+        console.print(f"  总事件数: {len(events)}")
+        for evt, count in sorted(event_counts.items()):
+            console.print(f"  · {evt}: {count}")
+
+        # LLM 调用统计
+        llm_calls = [e for e in events if e.get("event") == "llm_call"]
+        if llm_calls:
+            prompt_tokens = sum(e.get("detail", {}).get("prompt_tokens", 0) for e in llm_calls)
+            completion_tokens = sum(e.get("detail", {}).get("completion_tokens", 0) for e in llm_calls)
+            cache_hits = sum(1 for e in llm_calls if e.get("detail", {}).get("cached"))
+            console.print(f"\n  LLM 调用: {len(llm_calls)} 次 (缓存命中: {cache_hits})")
+            console.print(f"  Token 消耗: prompt={prompt_tokens:,} + completion={completion_tokens:,} = {prompt_tokens + completion_tokens:,}")
+
+        # 维度结果
+        dim_events = [e for e in events if e.get("event") == "review_complete"]
+        for de in dim_events:
+            detail = de.get("detail", {})
+            succeeded = detail.get("dimensions_succeeded", [])
+            failed = detail.get("dimensions_failed", [])
+            score = detail.get("overall_risk_score", "?")
+            console.print(f"\n  风险评分: {score}/100")
+            if succeeded:
+                console.print(f"  成功维度: {', '.join(succeeded)}")
+            if failed:
+                console.print(f"  [red]失败维度: {', '.join(failed)}[/red]")
+
+        # 验证结果
+        verif_events = [e for e in events if e.get("event") == "verification_complete"]
+        for ve in verif_events:
+            d = ve.get("detail", {})
+            console.print(f"\n  证据验证: ✓{d.get('evidence_verified', 0)} "
+                          f"✗{d.get('evidence_unverified', 0)} "
+                          f"?{d.get('evidence_missing', 0)}")
+            if d.get("contradictions"):
+                for c in d["contradictions"]:
+                    console.print(f"  [red]  {c}[/red]")
+
+        # 候选规则
+        rule_events = [e for e in events if e.get("event") == "candidate_rules"]
+        for re_ in rule_events:
+            ids = re_.get("detail", {}).get("ids", [])
+            if ids:
+                console.print(f"\n  候选新规则: {', '.join(ids)}")
+
+        console.print()
 
 
 if __name__ == "__main__":

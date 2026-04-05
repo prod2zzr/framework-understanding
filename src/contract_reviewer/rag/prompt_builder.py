@@ -62,16 +62,35 @@ class PromptBuilder:
             **extra_vars,
         )
 
-        # Pre-flight check: warn if rendered prompt exceeds token budget
+        # Pre-flight check: validate token budget and auto-trim if needed
         rendered_tokens = len(self._enc.encode(rendered))
         if rendered_tokens > self.max_context_tokens:
+            overflow = rendered_tokens - self.max_context_tokens
             logger.warning(
-                "Prompt exceeds token budget: %d > %d tokens (template=%s). "
-                "Legal context may need trimming.",
+                "Prompt exceeds token budget by %d tokens (%d > %d, template=%s). "
+                "Trimming legal context.",
+                overflow,
                 rendered_tokens,
                 self.max_context_tokens,
                 template_name,
             )
+            # 重新渲染：缩减法律上下文的可用空间
+            if legal_context:
+                trimmed_context = self._fit_context(
+                    legal_context, contract_text, rules,
+                    extra_reduction=overflow + 100,
+                )
+                rendered = template.render(
+                    contract_text=contract_text,
+                    legal_context=trimmed_context,
+                    rules=rules_text,
+                    **extra_vars,
+                )
+                final_tokens = len(self._enc.encode(rendered))
+                logger.info(
+                    "Prompt trimmed: %d → %d tokens (template=%s)",
+                    rendered_tokens, final_tokens, template_name,
+                )
 
         return rendered
 
@@ -80,13 +99,14 @@ class PromptBuilder:
         contexts: list[RetrievedContext],
         contract_text: str,
         rules: list[dict] | None,
+        extra_reduction: int = 0,
     ) -> str:
         """Fit legal context within available token budget."""
         # Calculate tokens used by other components
         contract_tokens = len(self._enc.encode(contract_text))
         rules_tokens = len(self._enc.encode(str(rules))) if rules else 0
         overhead = 200  # Template structure, instructions
-        available = self.max_context_tokens - contract_tokens - rules_tokens - overhead
+        available = self.max_context_tokens - contract_tokens - rules_tokens - overhead - extra_reduction
 
         if available <= 0:
             return ""
