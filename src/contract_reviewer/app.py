@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
@@ -84,6 +84,22 @@ async def _verify_api_key(request: Request) -> None:
             raise HTTPException(401, "Invalid or missing API key")
 
 
+_ALLOWED_SUFFIXES = {".pdf", ".docx", ".txt"}
+
+
+def _validate_upload_filename(filename: str | None) -> str:
+    """校验上传文件名，返回安全的后缀。
+
+    - 去掉路径部分，只保留文件名
+    - 白名单校验后缀
+    """
+    safe_name = PurePosixPath(filename or "contract.txt").name
+    suffix = Path(safe_name).suffix.lower()
+    if suffix not in _ALLOWED_SUFFIXES:
+        raise HTTPException(422, f"不支持的文件类型: {suffix}，仅支持 {', '.join(sorted(_ALLOWED_SUFFIXES))}")
+    return suffix
+
+
 def _save_upload(file_content: bytes, suffix: str) -> str:
     """Save uploaded content to a temp file and return its path."""
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -100,7 +116,7 @@ async def review_contract(
     if _engine is None or _settings is None:
         raise HTTPException(503, "Service not initialized")
 
-    suffix = Path(file.filename or "contract.txt").suffix
+    suffix = _validate_upload_filename(file.filename)
     content = await file.read()
     tmp_path = _save_upload(content, suffix)
 
@@ -129,7 +145,7 @@ async def review_contract_stream(
     if _engine is None or _settings is None:
         raise HTTPException(503, "Service not initialized")
 
-    suffix = Path(file.filename or "contract.txt").suffix
+    suffix = _validate_upload_filename(file.filename)
     content = await file.read()
     tmp_path = _save_upload(content, suffix)
 
