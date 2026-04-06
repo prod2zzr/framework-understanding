@@ -12,3 +12,6 @@ data/
 .cache/
 .env
 .manifest.json
+
+# 外部参考仓库（仅供研究，不入版本控制）
+waza/
