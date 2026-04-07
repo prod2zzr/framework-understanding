@@ -24,7 +24,7 @@ GLOBAL_SKILLS_DIR="${HOME}/.claude/skills"
 TMP_DIR=""
 
 # 可安装的 skills（目录形式）
-AVAILABLE_DIR_SKILLS=(quickstart quick-framework framework-understanding)
+AVAILABLE_DIR_SKILLS=(quickstart quick-framework framework-understanding diagram ppt-as-code awesome-design-md)
 # 可安装的 skills（单文件形式）
 AVAILABLE_FILE_SKILLS=(setup-cowork setup-cowork-teams)
 
