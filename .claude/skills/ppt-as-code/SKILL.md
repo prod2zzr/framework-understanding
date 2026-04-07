@@ -44,7 +44,17 @@ effort: high
 - `/ppt-as-code AI Agent 技术架构分享` → 主题=AI Agent, 场景=推断, 零交互
 - `/ppt-as-code --reveal --advanced https://docs.example.com` → reveal.js 进阶版, 附带 URL
 - `/ppt-as-code 季度业绩汇报 --basic` → 基础版, 投屏场景
+- `/ppt-as-code 用 Notion 风格做产品介绍` → 自动从 awesome-design-md 读取 Notion 的 DESIGN.md 作为视觉参考
 - `/ppt-as-code` → 无参数，进入交互模式
+
+### 品牌风格引用（与 awesome-design-md 集成）
+
+如果用户指定了品牌风格（如"Notion 风格"、"Stripe 风格"、"Apple 风格"），在 Phase 1 中：
+1. 从 `awesome-design-md` skill 的品牌索引中查找对应文件
+2. `Read` 对应的 DESIGN.md（如 `.claude/skills/awesome-design-md/references/brands/design/notion.md`）
+3. 记录到内容大纲中：`视觉参考：{品牌名} ({文件路径})`
+4. 在 Phase 3 中，将 DESIGN.md 的 Color Palette + Typography + Layout 直接作为 Agent A 的输入
+5. **跳过"3 套风格方向"流程**——品牌风格已确定，无需再选
 
 ### 快速模式（$ARGUMENTS 已含主题 + 可推断配置时）
 
